@@ -1,0 +1,1557 @@
+---
+title: "An Investigation of Random Forest Variable Selection Algorithms"
+author: "Rebecca Salzer"
+date: "Fall Term 2022"
+header-includes:
+   - \usepackage{amsmath}
+output:
+  word_document: default
+---
+
+```{r IHRTLUHC, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE)
+library(tidyverse)
+library(gridExtra)
+library(naniar)
+library(caret)
+```
+
+## Introduction
+
+|           Innovations in data science within the last few decades have given researchers looking to cure diseases, such as Alzheimers and different forms of cancers, a whole collection of different techniques to help understand and eventually cure these diseases. Often this research is focused around genetic data. Genetic datasets are often incredibly large, making it nearly impossible for researchers to decode this information by hand. 
+
+|           New non-parametric statistical algorithms have allowed these researchers to process and better understand their data without relying on any initial parameter settings, meaning that only few assumptions are needed to be made about the data's underlying structure. One of these non-parametric algorithms is Breiman's Random Forest algorithm, created in 2001. Random forests are able to process large amounts of data in a relatively short amount of time, and create importance scores for each predictor variable included in the dataset. The variables with higher importance scores are more likely to be important when building a model to accurately predict a response. 
+
+|           Despite these importance scores giving researchers useful information about which variables are likely to be the most important, these importance scores alone are not a reliable measure for choosing all important variables in the dataset. There is no reliable way to set a threshold across different types of data, to determine which variable importance scores are high enough to be considered important. Scholars have since created algorithms which use these importance scores and a variety of different statistical methods, to determine which variables are actually important. 
+
+|           Six of these algorithms, Vita (Janitza, Celik & Boulesteix 2016), Boruta (Kursa & Rudnicki 2010), Altmann (Altmann et al. 2010), VarSelRF (Díaz-Uriarte & Alvarez de Andrés 2006), VSURF (Genuer, Poggi & Tuleau-Malot 2010) and RFE (Darst, Malecki & Engelman 2018), along with the original permutation scores (Breiman 2001) will be compared in this report, using four different datasets. The first dataset is a real dataset that trys to predict hospital deaths using numerous variables describing the patient and hospitals conditions. The next dataset is a simulated dataset where none of the variables have effect sizes and therefore none are intended to be important. The third dataset is a simulated dataset where there is real correlation between predictor variables, but only 24 of the variables have an effect on the response variable and the final dataset is also a simulated dataset where 24 variables have designated effects on the response, however there is no correlation. 
+
+## Random Forests
+
+|           Random forests are a machine learning algorithm, created by Breimann in 2001, that requires the user to make few assumptions about the distribution of the data and they work for both classification and regression problems (Breiman 2001). Random forests are created from a collection of hundreds to thousands of decision trees and are used as a way to get importance scores for each predictor variable included in the dataset (Schonlau & Zou 2020). When building the random forest to obtain these variable importance scores, each tree is grown using a different bootstrap sample, so some data is not used when building the tree, this data is known as out-of-bag data. A permutation process takes place as the forest is being developed and relies on this out-of-bag data (Janitza, Celik & Boulesteix 2016). After each individual tree in the forest is constructed, the values of a single variable using the out-of-bag data are randomly permuted. This is the process of randomly shuffling the variable, to break all correlation and therefore effect between this variable and the response. 
+
+|           After the permutation is done the out-of-bag permuted data is dropped down the tree that is being worked on and the classifications that were made using the out-of-bag permuted data are saved. This process is repeated for every variable in the dataset. Once this has been completed, the saved classifications are compared with the true class labels to get misclassification rates. The percent increase in misclassification rates after the permutation of each variable is recorded for each tree  (Breiman 2001). This process is repeated thousands of times, for each of the thousands of trees as the forest is grown. The average percent increase across the entire forest in misclassification rates after the permutation of each variable in each tree is then calculated. Finally, the importance scores that are shown and the corresponding rankings are the result of the average of those increases in misclassification rates after permutation (Breiman 2001). This means that the larger the permutation importance, the more predictive the variable. This is because a large importance score indicates that when a given variable’s effect on the response is removed through the permutation process, there was a large decrease in the accuracy of the model, indicating that it was a very  predictive variable (Chen & Ishwaran 2012).
+
+|           It should be noted that this process should be used with some caution as it contains a biased split selection (Janitza, Celik & Boulesteix 2016). This means that variables with multiple categories or splits are more likely to be deemed relevant than variables with less categories, unrelated to their true effect on the response. Using continuous data or data with similar category sizes can help avoid this bias. 
+
+|           Although this random forest algorithm results in permutation importance scores, it is nearly impossible to know from these importance scores alone whether a variable is relevant. Variable importance scores are made of a many different factors including things such as correlation and the number of variables being used, and some non-important variables can have positive importance scores. To solve this issue of selecting actual important variables, while using these importance scores, many algorithms have been created that use these original permutation importance scores and perform statistical procedures to determine which variables are relevant. Six of these algorithms will be examined for their accuracy and computation time in this report.
+
+
+## Important Variable Selection Algorithms
+
+|           The algorithms being studied in this report, are algorithms that function as wrappers around random forest algorithms. They each start with the information collected from the original random forest importance scores and use statistical methods to determine whether each individual predictor is actually relevant when predicting the response. Six variable selection algorithms were examined for this report, Vita, Altmann, VarSelRF, Boruta, VSURF, RFE and then the original permutation scores. VSURF for interpretation and prediction was researched and briefly examined, but was not part of the results section, due to it's very large computation time. 
+
+### Original Permutation Scores
+
+|           The original permutation scores method is known to be the most naive way of selecting which variables are important (Janitza, Celik & Boulesteix 2016). To select the important variables, variable importance scores from the original random forest are obtained and variables with permutation scores above a certain threshold are considered important. Determining a threshold is arbitrary, as variable importance scores are made of a collection of different factors including things such as correlation and the number of variables being used. This means that there is no universally applicable threshold. Using this arbitrary threshold therefore makes this original permutation method known for being a naive approach (Janitza, Celik & Boulesteix 2016). It was included in this report for the purpose of comparison. The threshold being used for all datasets in this report will be 0.01. 
+
+### Boruta
+
+|         	Boruta is an algorithm named after a god of the forest in Slavic mythology that is designed to identify important variables using random forest importance values (Degenhardt, Seifert & Szymczak 2017). Boruta, was given this name because it’s tactic of increasing randomness and using that randomness to find important variables, originates from the spirit of the random forest itself. The first step for the Boruta algorithm is to create new “shadow variables." These variables are unimportant variables that will later be used for deciding which variables are really important. The shadow variables are created by adding copies of all the original variables in the dataset (Kursa & Rudnicki 2010). After the copies are made, the values of these new shadow variables are then randomly permuted, to remove all correlation with the response. This means that any impact these shadow variables are shown to have on the response will be due only to noise. Studying the results from these randomized variables allows for a better understanding of all the random impacts and correlations in the dataset, making it easier to see which of the original variables are truly unimportant, when they are showing similar random fluctuations to the shadow variables (Kursa & Rudnicki 2010).
+
+|         	A random forest is built using this new dataset, including the real variables and the shadow variables, and the importance scores are collected. Then the maximum importance score from all the shadow variables is found. This maximum importance score is then used as a threshold that the original non-shadow variables are compared against (Kursa & Rudnicki 2010). The null hypothesis is that the variable being examined has the same importance score as the maximal importance of the random attributes. If this is not true, and the importance score of the real variable is significantly higher or lower than the maximal score of the random attributes, this variable is deemed either important or unimportant. If a variable has a significantly higher importance value than the maximal importance of the random attributes, it is deemed important. If a variable has a significantly lower importance value than the maximal importance of the random attributes, it is deemed unimportant (Kursa & Rudnicki 2010). Variables that don’t fall into either of these categories are considered undetermined. 
+
+|         	To test and see if a variable has a significantly higher or lower variable importance score than the maximal importance score of the random attributes, a two-sided test of equality is run. The two sided test of equality is run for each variable to see if the maximum score of the shadow attributes is equal to the importance score of each variable (Kursa & Rudnicki 2010). Significance is determined as a result of under .01 or over .99 on the two sided test. Variables that have an importance significantly higher than the maximum score of the shadow attributes are deemed important, variables that have an importance significantly lower than the maximum score of the shadow attributes are deemed unimportant and those that do not fall on the extremes of the distribution are undetermined. Variables that have been deemed as either important or unimportant are classified as such and then removed from the dataset along with their corresponding shadow attributes, so that only undetermined variables remain. This entire process of creating shadow variables, collecting importance scores, and running the two-sided test of equality to determine the real variables importance is repeated until all variables have been deemed as either important or unimportant, or until a designated number of runs have been completed (Kursa & Rudnicki 2010).
+
+
+### VarSelRF
+
+|         	  VarSelRF is a simple backward elimination procedure that determines the importance of variables from the prediction accuracy of different random forests. Backward elimination is the process of starting with all variables in a model and then repeatedly removing the least important variables and fitting new models, until the final model only contains the most important variable. Because of VarSelRF’s backward elimination procedure, the computation time is fairly low compared to other algorithms being examined (Speiser, Miller, Tooze & Ip 2019). To begin this process, a random forest with all variables in the dataset is built. After the first forest is built a chosen fraction of the variables is dropped from the dataset, the variables which are chosen are the ones with the lowest importance scores, and a new random forest is built. The authors of this algorithm had chosen their fraction dropped to be 0.2, claiming that it allowed for an “aggressive variable selection”, however these authors are using this algorithm for genetic data, which can have hundreds if not thousands of predictors (Díaz-Uriarte & Alvarez de Andrés 2006).
+
+|         	  This process of dropping variables by a consistent percentage and creating random forests is continued until the final random forest is built with only one variable. It is important to note that the importance scores are not recalculated after each forest is built, when deciding which variables to drop. Instead, the importance scores from the original random forest are used and a fraction get dropped at each iteration, with the lowest scores being dropped first and the highest importance score being the final variable. After all random forests have been built, their OOB error rates are examined (Díaz-Uriarte & Alvarez de Andrés 2006).
+
+|         	  There are two different ways to choose the important variables. The first option is to simply choose the random forest with the lowest OOB error rate and deem the variables within that forest important. The second option is to choose the random forest with the least amount of variables, that has an OOB error rate within one standard error of the minimum error rate of all the forests. This will generally result in choosing a smaller number of important variables. This method of selecting a model that does not have the minimum error rate is used to increase stability and predictability. When working with data with hundreds of predictors, such as genetic datasets, the chances are good that some variables that are deemed as important will have hidden correlations between other important variables, creating redundancy and instability in the model. Therefore, selecting the model with fewer predictors can lead to more stable results across multiple trials, while still achieving an error rate that is within sampling error of the minimum OOB error rate (Díaz-Uriarte & Alvarez de Andrés 2006). However, selecting using the second option could also lead to some important variables being rejected. The first option of choosing the important variables is what will be used for this report. This is due to the datasets being used having a relatively small number of predictors and because we would like this algorithm to select all potentially important variables.
+    
+### Recursive Feature Elimination
+
+|         	  Recursive Feature Elimination or RFE functions almost exactly the same as VarSelRF. The only distinction between the two algorithms, is that after each time a fraction of the variables is dropped from the dataset, the variable importance scores are recomputed and the variables are reordered. Scholars such as Darst, Malecki and Engelmanwho, claim this method performs better than VarSelRF in complex data setting with high amounts of correlation (Darst, Malecki & Engelman 2018). They claim VarSelRF is likely to do worse in these situations, because correlation can impact the original importance scores, making non important variables that are correlated with relevant ones have higher importance scores than variables with their own effect size. If these importance scores are never recomputed as variables are dropped, VarSelRF would have to choose a model with many variables that don't have their own effect size, in order to include all the variables that do, or VarSelRF would have to choose a smaller model that doesn't contain all variables that had their own effect size, to ensure non-important variables are not chosen (Darst, Malecki & Engelman 2018). 
+
+### Altmann
+
+|          Altmann’s variable importance algorithm is a permutation-based testing approach that works using random forests. This algorithm outputs p-values for each variable, which are then used to determine if a variable is important. To obtain these p-values, a random forest is first built using all the variables and the variable importance scores are obtained. The next step is to use permutation to get importance scores for variables in settings where the variables have no effect. To do this, Altmann randomly permutes the response vector to remove any effect on the response from the variables. Once the response vector has been randomly permuted, a new random forest is built and the importance scores for each non-important variable are obtained (Janitza, Celik & Boulesteix 2016).
+
+|          These importance scores from the known non-important variables are then used to form a previously unknown null distribution centered around zero. This process of randomly permuting the response vector, building a random forest and obtaining importance scores is repeated 100 times. This means that when this process is done, each variable has 100 importance scores from non-important versions of that variable, which make up that variable’s previously unknown null distribution (Janitza, Celik & Boulesteix 2016). There are two different ways that you can then use these importance scores to find p-values, the parametric approach, and the non-parametric approach. The non-parametric approach is when you obtain the p-value from the fraction of the 100 importance scores in the null distribution that are larger than the original importance score. If there is a very small number of importance scores from the null distribution that are larger than the meaningful importance score, the p-value will be small, and the variable will be deemed important. This is referred to as the non-parametric approach because it doesn’t assume anything about the distribution (Janitza, Celik & Boulesteix 2016). For the parametric approach, you can assume any given distribution for the importance scores of the non-important variables, the most used are Gaussian, Log-normal and Gamma-distribution. The importance scores of the non-important variables are then used to obtain the correct parameters for the assumed distribution. Finally, the p-values are calculated as the probability of obtaining an importance score that is higher than the original meaningful importance score, given this assumed distribution (Janitza, Celik & Boulesteix 2016). The non-parametric method will be used for this report.
+
+
+
+### VSURF
+
+|           VSURF is known as a two-step algorithm. The first step is ranking the variables based on their importance values and eliminating the unimportant ones. To rank the variables, multiple random forests are built, using all variables and the average variable importance score for each variable are collected. The variables are then ranked from highest average importance score to lowest. The first elimination process is done by keeping the variables in the order of their current rankings and plotting them on a graph (Genuer, Poggi & Tuleau-Malot 2010).
+
+|           The standard deviation and the variable importance rank are plotted for each variable, with the standard deviation being on the y axis. The standard deviation of the variable importance measures should be larger when variables are actually important, therefore the values in the graph should form a curve. This graph is used to find a threshold for which variables are important, however there are many other ways to choose a threshold (Genuer, Poggi & Tuleau-Malot 2015). The most used method, however, is to find the minimum prediction value that is given by a CART model fitting this curve. The CART model fits a piece-wise constant function. A piece-wise constant function is a function defined by several constant sub-functions. The minimum prediction value given by the CART model is therefore the value of the minimum constant sub-function. This minimum prediction value is then used as a threshold for determining which variables are unimportant (Genuer, Poggi & Tuleau-Malot 2010). Figure one shows a graph displaying the curve formed by the variable importance standard deviations and rankings, along with the green CART function and the red dotted line, which represents the threshold point where there was the lowest constant sub-function. Once the threshold value is found, variables with an average variable importance value that is lower than that threshold are eliminated (Genuer, Poggi & Tuleau-Malot 2015).
+
+#### Figure One
+
+Figure one is displaying the original ranking of the variables' permutation importance scores, against their variable importance standard deviation. 
+```{r VSURF threshold}
+knitr::include_graphics("threshold.png")
+```
+
+|           The second step of this two-step algorithm is variable selection. There are two separate ways to go about the variable selection process, variable selection for interpretation or variable selection for prediction. When doing variable selection for interpretation a collection of RF models are created. The first model created is the model that contains only the most important variables, the second model contains the first and second most important variables and so on, until the final model contains all the variables retained from step one (Genuer, Poggi & Tuleau-Malot 2015). The OOB error rates for each model are computed and this process is repeated about 25 to 50 times, so that the average OOB error rates for each model can be calculated. Finally, the model with the lowest OOB error rate after this process is chosen as the best model for interpretation, and the variables within it are deemed relevant (Genuer, Poggi & Tuleau-Malot 2015). Although VSURF for prediction takes a long time as well, this is the most time consuming part of the algorithm.
+
+|           The second method for the variable selection process is variable selection for prediction. In this process, variables are only added to the model if they improve the OOB error, significantly more than you would by adding unimportant noisy variables. Once again, the process starts with the ordered sequence of variables retained in step one, then one at a time variables are added to the model (Genuer, Poggi & Tuleau-Malot 2010). The OOB error of the version of the model with and without each variable are compared and the variable is only included if the decrease in the OOB error is greater than a threshold. The threshold is there to make sure that the difference in OOB error is not due simply to noise (Genuer, Poggi & Tuleau-Malot 2015). This threshold is calculated by first collecting the OOB errors from the model that was selected for interpretation and the model with all variables that were found after the initial elimination process. The difference between the OOB errors of these two models is found and the absolute values of those differences is calculated. Finally, the threshold is set as the average of these values. After all random forests have been built and all variables have been considered for inclusion, using the threshold and the decrease in OOB error rates, the best model is the final model, with all the variables that passed the threshold. These variables are therefore deemed as important for prediction (Bag, Gupta & Deb 2022).
+
+### Vita
+
+|           The Vita algorithm is designed to perform best on data with large amounts of predictor variables and a large number of non-important variables. Specifically, it was designed to perform well with genetic data. This method is not based on the classical permutation variable importance, but instead based on the hold-out version of the classical permutation importance. This allows Vita algorithm to run on datasets with thousands of predictors in a relatively small amount of time. The first step for this approach is to randomly split the dataset in half, with each half being used to create a separate random forest. The dataset is split in half so that each half can be used for creating a forest and each half can be used for calculating the importance scores of the other forest. This is known as two-fold cross validation (Janitza, Celik & Boulesteix 2016).
+
+|           The two separate forests are created, and variable importance values and rankings are computed. Then, a null distribution is created using the variable importance values that are either zero or negative. This null distribution is created by first, finding the distribution of variable importance values that are either zero or negative. The next step is to mirror this distribution around the y-axis, the original distribution combined with the mirrored distribution should then create a null distribution that is centered around zero, as long as there is a large enough number of non-important variables (Janitza, Celik & Boulesteix 2016). The original Vita report shows, after running multiple simulations, that this null distribution can be assumed to follow a normal distribution. However, it also showed this process only works when using two-fold cross validation (Janitza, Celik & Boulesteix 2016). When using out-of-bag validation, the null distribution has been shown to be positively skewed and therefore not symmetric around zero (Degenhardt, Seifert & Szymczak 2017).
+
+|           Once the null distributions is created, using the zero and negative importance scores from the two random forests, the positive variable importance values are compared to this distribution, to determine which variables are important. This process is done by calculating p-values, depending on where the positive variable importance scores fall on the null distribution. As variable importance scores get further from zero, they are further out in the distribution, meaning they have more extreme importance values, they will have smaller p-values and they will be more likely to be important variables. This means that variables with higher importance rankings will always have smaller p-values than variables with lower importance rankings (Janitza, Celik & Boulesteix 2016).
+
+|           Like the authors of Vita mentioned, this algorithm does not perform well on data with a small amount of zero or non-important variables. If there are not enough of these variables, then the null distribution being built with them will be skewed, resulting in bad selections for important variables. There can also be highly correlated settings, where Vita won't work at all due to a complete lack of zero or negative importance scores. For this report I've created a algorithm that contains Vita, which allows Vita to function even in these circumstances. 
+
+### New Vita
+
+|           To ensure that Vita always functions, it is important to ensure that there are enough zero and negative importance scores to build the null distribution. The larger the sample size of these zero and negative importance scores, the more sensitive and therefore the better the null distribution of the non-important variables becomes.  Therefore, this new Vita algorithm first performs a check to see how many of the variables are negative or non zero. If there are more than 30 of these variables, Vita runs as normal. If these are not more than 30, a certain number of shadow variables are created, using the same method as Boruta. The number 30 was chosen as an arbitrary threshold when determining how many variables should be sufficient. More research should be done into whether there is a better threshold that can be applied to all datasets, or a better way to determine a different thresholds based on features of the dataset being used. The amount of shadow variables that need to be made is (30-(the current number of zero and negative variables))*2.25. The difference is being multiplied by 2.25 because the shadow variables are expected to vary around zero, meaning only about half of them will result in negative or zero importance scores. The difference was multiplied by 2.25 instead of 2, to ensure that there would be a minimum of 30 variables in almost all cases. 
+
+|           After these shadow variables have been created, by adding copies of old variables and permuting the vectors, the permutation scores of the dataset are re-evaluated. Once these new permutation scores are obtained, shadow variables that had positive permutation scores were removed from the dataset, while the negative shadow variables remained. Finally, the original Vita process of building the null distribution, was done using the negative and zero permutation importance scores from the real dataset and the shadow variables. Then, in the same manner as Vita, p-values were determined for the variables with positive importance scores, using this distribution. 
+
+  
+## Data Exploration
+
+```{r data input, eval=FALSE}
+data <- read_csv("dataset.csv")
+head(data)
+```
+
+```{r data manipulation, eval=FALSE}
+#remove variables with large numbers of missing values
+data <-subset(data, select = -c(X84))
+#remove remaining rows with missing values
+data <- data[complete.cases(data),]
+nearZeroVar(data, freqCut = 92.5/7.5 , saveMetrics = TRUE)
+#remove variables with little to no variation 
+data <-subset(data, select = -c(icu_stay_type, arf_apache, gcs_unable_apache, aids, cirrhosis, hepatic_failure, immunosuppression, leukemia, lymphoma, solid_tumor_with_metastasis))
+#make all variables numeric, except for response
+data$gender<-as.numeric(factor(data$gender))
+data$ethnicity<-as.numeric(factor(data$ethnicity))
+data$icu_admit_source<-as.numeric(factor(data$icu_admit_source))
+data$icu_type<-as.numeric(factor(data$icu_type))
+data$apache_3j_bodysystem<-as.numeric(factor(data$apache_3j_bodysystem))
+data$apache_2_bodysystem<-as.numeric(factor(data$apache_2_bodysystem))
+data<-data[1:10000, ]
+datax <-subset(data, select = -c(hospital_death))
+datax<-scale(datax, center = TRUE, scale = TRUE)
+datax<-as.data.frame(datax)
+#make response yes/no
+datay<-as.factor(data$hospital_death)
+data <- merge(datay, datax, by='row.names')
+data <-subset(data, select = -c(Row.names))
+colnames(data)[1] ="hospital_deaths"
+mod <- glm(data = data, hospital_deaths ~ ., family = "binomial")
+summary(mod)
+head(data)
+```
+
+```{r summary statistics, eval=FALSE}
+summary(datax)
+dim(datax)
+```
+
+```{r plots, eval=FALSE}
+#graphs examining distribution of the response, age distribution, relationship between age and deaths, relationship between max heart rate and deaths, relationship between height and death and relationship between hospital id and deaths. 
+p1<-ggplot(data = data) +  geom_bar(mapping = aes(x = datay))
+p2<-ggplot(data = data) +  geom_bar(mapping = aes(x = age))
+p3<-ggplot(data = data, mapping = aes(x = age, y = datay)) +  geom_boxplot()
+p4<-ggplot(data = data, mapping = aes(x = d1_heartrate_max, y = datay)) +  geom_boxplot()
+p5<-ggplot(data = data, mapping = aes(x = hospital_id, y = datay)) +  geom_boxplot()
+p6<-ggplot(data = data, mapping = aes(x = height, y = datay)) +  geom_boxplot()
+grid.arrange(p1,p2,p3,p4,p5,p6, ncol=2)
+```
+
+|           The data that I will be using to investigate these algorithms is a patient survival prediction dataset from Kaggle. This dataset initially contained 85 variables and  91,713 observations, with the response variable being hospital deaths. Hospital deaths is a binary variable, with 0 meaning the subject survived and 1 meaning the subject died. The original data contained some NA values. When cleaning the data,  34,778 rows were removed which contained missing values, after one column was removed due to almost all of it's values being NA. Next, the variables' variances were checked for zero and near zero variance. Zero variance is when all of a predictors unique value's are the same and near zero variance is when the majority of a predictors unique values are the same. For this report, predictors with a ratio between their most common unique value and their second most common unique value, of at least 92.5:7.5 were considered to have near zero variance. Variables with zero or near zero variance were removed from the dataset. These included stay type, arf apache, gcs unable apache, aids, cirrhosis, hepatic failure, immunosuppression, leukemia, lymphoma and solid tumor with metastasis. 
+
+|           After all the variables with near zero variance were removed along with the NA’s, all variables except for the response, were converted to numeric. Then, all predictor variables were centered and scaled and the response variable was converted to a factor. Finally, the dataset was reduced to it's first 10,000 observations, to lower computation time. After this data cleaning, the resulting dataset has 74 variables and 10,000 observations. The predictor variables measure various features of the hospital and the subject. These variables include things such as the hospital id, the patients age, weight, max and min heartrate in the first hour and day, height and more. A full description of the variables can be found in Appendix A. The response variable for this dataset, which will be used for prediction, is hospital deaths.
+
+## Methods
+
+|           In order to test these algorithms in a variety of settings, the algorithms will be tested on three simulated datasets, in addition to the real data. Using simulated data is important so it can be known which variables are truly important. Knowing the true importance of variables is not possible while using real world data sets (Janitza, Celik & Boulesteix 2016). In addition to simulating which variables are actually important, it is also critical to investigate how these algorithms perform on different levels of correlated variables. When looking at highly correlated real world data it can become more difficult for these statistical tests to decide which variables are actually having an impact on the response, rather than being highly correlated with an important variable, leading them to choose unnecessary variables. For example, if height and weight are selected as important, bmi will also likely be selected, due to the high correlation between these variables. However, we wouldn't want our model to select bmi, as it provides no additional information about the patient, since bmi can be calculated using height and weight. Some algorithms have a much harder time dealing with high levels of correlation.
+
+|           A similar process was followed for creating these simulated datasets as was in the Vita report (Janitza, Celik & Boulesteix 2016). Each of the three datasets were created from the original hospital deaths dataset, using it's design matrix, but creating new response vectors and permuting variables as necessary to create the desired simulated datasets. The first dataset simulated a scenario where none of the predictors were important. The second datset simulated a scenario where 24 of the 73 predictors had positive effect sizes, and used the original correlation patterns of the real world data. The third and final dataset simulated a scenario where 24 of the 73 predictors had positive effect sizes, but all of the predictor variables in this dataset were uncorrelated (Janitza, Celik & Boulesteix 2016).
+
+```{r simulated dataset one, eval=FALSE}
+#create simulated data where none of the variables have an effect on the response
+set.seed(12092000)
+simdata1x <- datax #no important predictors
+y <- datay
+simdata1y <- sample(y) #permutation of response vector
+simdata1y<-as.factor(simdata1y)
+simdata1 <- merge(simdata1y, simdata1x, by='row.names')
+simdata1 <-subset(simdata1, select = -c(Row.names))
+colnames(simdata1)[1] ="hospital_deaths"
+mod2 <- glm(data = simdata1, hospital_deaths ~ ., family = "binomial")
+summary(mod2)
+```
+
+|           To create the first simulated dataset, where none of the predictors are important, the first step is to use the real world data and design matrix of dataset one. In order to alter this dataset to make it so that none of the predictors are important, the elements of the response vector were permuted randomly, to destroy any associations between the elements of the response vector and the predictor variables. In this simulated dataset there is no permutation being done of the predictor variables, so all original correlation patterns between predictors from the real world data set one are still present (Janitza, Celik & Boulesteix 2016).
+
+```{r simulated dataset two, eval=FALSE}
+#create simulated data with new known response vector, use original correlation
+set.seed(12092000)
+simdata2x <- datax
+beta1 <- 3 #apache_post_operative, bmi, di_sysbp_max 
+beta2 <- 2 #d1_resperate_min, d1_spo2_min,age 
+beta3 <- 1 #d1_heartrate_max, h1_resperate_min, ventaliated_apache 
+beta4 <- .5 #apache_2_diagnosis, h1_spo2_max, d1_potassium_max
+beta5 <- -.5 #gcs_verbal_apache, pre_ice_los_days,patient_id 
+beta6 <- -1 #encounter_id, map_apache, d1_diasbp_noninvasive_max
+beta7 <- -2 #h1_diasbp_noninvasive_max, h1_sysbp_min, h1_heartrate_min
+beta8 <- -3 #d1_mbp_max, d1_glucose_max, d1_spo2_max
+linear1 <- beta1*simdata2x$apache_post_operative + beta1*simdata2x$bmi + beta1*simdata2x$d1_sysbp_max +
+           beta2*simdata2x$d1_resprate_min + beta2*simdata2x$d1_spo2_min + beta2*simdata2x$age + 
+           beta3*simdata2x$d1_heartrate_max + beta3*simdata2x$h1_resprate_min + beta3*simdata2x$ventilated_apache+ 
+           beta4*simdata2x$apache_2_diagnosis + beta4*simdata2x$h1_spo2_max + beta4*simdata2x$d1_potassium_max + 
+           beta5*simdata2x$gcs_verbal_apache + beta5*simdata2x$pre_icu_los_days + beta5*simdata2x$patient_id+
+           beta6*simdata2x$encounter_id + beta6*simdata2x$map_apache + beta6*simdata2x$d1_diasbp_noninvasive_max + 
+           beta7*simdata2x$h1_diasbp_noninvasive_max + beta7*simdata2x$h1_sysbp_min+ beta7*simdata2x$h1_heartrate_min + 
+           beta8*simdata2x$d1_mbp_max + beta8*simdata2x$d1_glucose_max + beta8*simdata2x$d1_spo2_max 
+p1 <- (exp(linear1) / (1 + exp(linear1)))
+responsevec <- rbinom(10000, size = 1, prob = p1)
+responsevec<-as.factor(responsevec)
+simdata2y <-responsevec
+simdata2 <- merge(simdata2y, simdata2x, by='row.names')
+simdata2 <-subset(simdata2, select = -c(Row.names))
+colnames(simdata2)[1] ="hospital_deaths"
+mod2 <- glm(data = simdata2, hospital_deaths ~ ., family = "binomial")
+summary(mod2)
+```
+
+|           To create the second simulated dataset where 24 of the 74 predictors had their own effect sizes, while using the original correlation patterns of the real world data, we again start by using the original hospital deaths dataset. In this scenario again, there is no permutation being done of the predictor variables, so all original correlation patterns from the real world data set are still present. However, unlike the first simulated dataset, for this simulated dataset the response vector is not being permuted randomly, instead a new response vector was created, following a specified relation. 
+
+|           To create this new response vector, the first step was to randomly choose 24 predictor variables from the dataset without replacement. Based on the order they were chosen, they were each given a specific effect size. The different effect sizes were {-3, -2, -1,  -0.5, 0.5, 1, 2, 3} with the first three predictor variables randomly chosen being assigned an effect size of -3 and the last three predictor variables randomly being chosen being assigned an effect size of 3. All other predictor variable effect sizes were 0. Using these effect sizes as coefficients, the probability for hospital death was calculated for each observation. The equations for calculating these exact probabilities is shown below. These probabilities are then manipulated using a binomial distribution, resulting in a response vector of 0's and 1's which were generated based on the variable effect sizes chosen (Janitza, Celik & Boulesteix 2016). By simulating the data this way, you are able to easily know which variables were intended to be important.
+
+$$
+\begin{multline*}
+p=\\3*(apache post operative+bmi+ d1 sysbpmax)+\\2*(d1 resprate min+d1 spo2 min +age)+\\1*(d1 heartratemax+h1respratemin+ventilatedapache)+\\0.5*(apache2diagnosis+h1spo2max+d1potassiummax)+\\(-0.5)*(gcs verbal apache+pre icu los days+patient id)+\\(-1)*(encounter id+map apache+d1 diasbp noninvasive max)+\\(-2)*(h1 diasbp noninvasive max+h1 sysbp min+h1 heartrate min)+\\(-3)*(d1 mbp max+d1 glucose max+d1 spo2 max)\\ 
+\end{multline*}
+$$
+
+$$
+probabilities = \frac{e^p}{1 + e^p}
+$$
+
+```{r simulated dataset three, eval=FALSE}
+#create simulated data with new known response vector, no correlation
+set.seed(12092000)
+simdata3x <- datax
+for (i in 1:ncol(simdata3x)) {
+  x<-simdata3x[[i]]
+  y <-sample(x)
+  simdata3x[ , ncol(simdata3x) +1 ] <- y
+  colnames(simdata3x)[ncol(simdata3x)] <- paste0(names(simdata3x)[i], "new")
+}
+simdata3x <-subset(simdata3x, select = -c(encounter_id, patient_id, hospital_id, age, bmi, elective_surgery,   
+                                  ethnicity, gender, height, icu_admit_source, icu_id,
+                                  icu_type, pre_icu_los_days, weight, apache_2_diagnosis, apache_3j_diagnosis,
+                                  apache_post_operative, gcs_eyes_apache, gcs_motor_apache, gcs_verbal_apache,
+                                  heart_rate_apache, intubated_apache, map_apache, resprate_apache,temp_apache,
+                                  ventilated_apache, d1_diasbp_max, d1_diasbp_min,  d1_diasbp_noninvasive_max,
+                                  d1_diasbp_noninvasive_min, d1_heartrate_max, d1_heartrate_min, d1_mbp_max,
+                                  d1_mbp_min, d1_mbp_noninvasive_max, d1_mbp_noninvasive_min, d1_resprate_max,
+                                  d1_resprate_min, d1_spo2_max, d1_spo2_min, d1_sysbp_max, d1_sysbp_min,
+                                  d1_sysbp_noninvasive_max, d1_sysbp_noninvasive_min, d1_temp_max, d1_temp_min,
+                                  h1_diasbp_max, h1_diasbp_min, h1_diasbp_noninvasive_max,
+                                  h1_diasbp_noninvasive_min, h1_heartrate_max, h1_heartrate_min, h1_mbp_max,
+                                  h1_mbp_min, h1_mbp_noninvasive_max, h1_mbp_noninvasive_min, h1_resprate_max,
+                                  h1_resprate_min, h1_spo2_max, h1_spo2_min, h1_sysbp_max, h1_sysbp_min,
+                                  h1_sysbp_noninvasive_max, h1_sysbp_noninvasive_min, d1_glucose_max, d1_glucose_min,
+                                  d1_potassium_max, d1_potassium_min, apache_4a_hospital_death_prob, 
+                                  apache_4a_icu_death_prob, diabetes_mellitus, apache_3j_bodysystem, apache_2_bodysystem))
+beta1 <- 3 #apache_post_operative, bmi, di_sysbp_max 
+beta2 <- 2 #d1_resperate_min, d1_spo2_min,age 
+beta3 <- 1 #d1_heartrate_max, h1_resperate_min, ventaliated_apache 
+beta4 <- .5 #apache_2_diagnosis, h1_spo2_max, d1_potassium_max
+beta5 <- -.5 #gcs_verbal_apache, pre_ice_los_days, patient_id
+beta6 <- -1 #encounter_id, map_apache, d1_diasbp_noninvasive_max
+beta7 <- -2 #h1_diasbp_noninvasive_max, h1_sysbp_min, h1_heartrate_min
+beta8 <- -3 #d1_mbp_max, d1_glucose_max, d1_spo2_max
+beta0 <-0
+linear2 <- beta0 + beta1*simdata3x$apache_post_operativenew + beta1*simdata3x$bminew + beta1*simdata3x$d1_sysbp_maxnew +
+                   beta2*simdata3x$d1_resprate_minnew + beta2*simdata3x$d1_spo2_minnew + beta2*simdata3x$agenew + 
+                   beta3*simdata3x$d1_heartrate_maxnew + beta3*simdata3x$h1_resprate_minnew + beta3*simdata3x$ventilated_apachenew+ 
+                   beta4*simdata3x$apache_2_diagnosisnew + beta4*simdata3x$h1_spo2_maxnew + beta4*simdata3x$d1_potassium_maxnew + 
+                   beta5*simdata3x$gcs_verbal_apachenew + beta5*simdata3x$pre_icu_los_daysnew + beta5*simdata3x$patient_idnew+
+                   beta6*simdata3x$encounter_idnew + beta6*simdata3x$map_apachenew + beta6*simdata3x$d1_diasbp_noninvasive_maxnew + 
+                   beta7*simdata3x$h1_diasbp_noninvasive_maxnew + beta7*simdata3x$h1_sysbp_minnew+ beta7*simdata3x$h1_heartrate_minnew + 
+                   beta8*simdata3x$d1_mbp_maxnew + beta8*simdata3x$d1_glucose_maxnew + beta8*simdata3x$d1_spo2_maxnew 
+p2 <- (exp(linear2) / (1 + exp(linear2)))
+responsevec <- rbinom(10000, size = 1, prob = p2)
+responsevec<-as.factor(responsevec)
+simdata3y <-responsevec
+simdata3 <- merge(simdata3y, simdata3x, by='row.names')
+simdata3 <-subset(simdata3, select = -c(Row.names))
+colnames(simdata3)[1] ="hospital_deaths"
+mod2 <- glm(data = simdata3, hospital_deaths ~ ., family = "binomial")
+summary(mod2)
+```
+
+|           The third and final dataset simulated a scenario where 24 of the 73 predictors were important, with varying specified effect sizes, but all of the predictor variables in this dataset were uncorrelated. This dataset was once again built from the original hospital deaths dataset. Building the response vector to ensure that 24 predictors have specific effect sizes was done the exact same way for the third simulated dataset as it was for the second simulated dataset. The same 24 variables where chosen for simulated datasets two and three.
+
+|           Before creating a new response vector it was also necessary to randomly permute the values of each predictor variable independently, this process breaks associations and the correlation between the predictor variables. After permuting the variables and adding in the new response vector, the result is the final dataset with uncorrelated predictors that have a known effect size on the response (Janitza, Celik & Boulesteix 2016).
+
+|           The 24 variables randomly chosen to have effect sizes for the second and third simulated datasets were, apache post-operative, bmi, day 1 sysbp max, day 1 resprate min, day 1 spo2 min, age, day 1 heartrate max, hour 1 resperate min, ventilated apache, apache 2 diagnosis, h1 spo2 max, d1 potassium max, gcs verbal apache, pre icu los days, patient id, encounter id, map apahce, day 1 diasbp noninvasive max, hour 1 diasbp noninvasive max, hour 1 sysbp min, hour one heartrate min, day 1 mbp max, day 1 glucose max and day 1 spo2 max.
+
+|           The real dataset and three simulated datasets will be used in this report to test the ability of these algorithms to choose the important variables in a reasonable amount of time. For the real data and simulated datasets two and three, models will be built using each algorithms recommended variables. Using these models, model accuracy (classification rate), type one error, type two error and area under the ROC curve (AUC) will be measured. Model accuracy compares the predictions from the models that were created from the variables selected by the different algorithms, to the original real responses. Model accuracy is the percent of all cases that were accurately classified, meaning real deaths were predicted as deaths and real survival was predicted as survival. Type one and two error are two different types of missclassification and these results are once again obtained by comparing the predictions of the models created to the original real responses. Type one error is predicting that someone died when they actually survived and type two error is predicting someone survived when they actually died. AUC measures the areas under the ROC curve. The ROC curve is a probability curve that measures the true positive classification rate against the model’s false positive classification rate.  Measuring the area under this curve tells us how well the model is actually doing at fitting the data and making predictions.  These additional measure are beneficial because sometimes model accuracy can lead to misleading results, due to skewed data. However, if this is the case with the real data or our simulated datasets, we will be able to more accurately see how the algorithms performed by comparing model AUC and type one and two error. 
+
+|           These results will not be measured for the first simulated dataset, because in that simulation the response vector is completely random and we do not expect any of the models to perform well. In addition to these measures of accuracy, all algorithms will be tested for computation time using all four of the datasets. Finally, the report will investigate which variables were chosen in the simulated settings where the true importance is known. 
+
+|           For the first simulated dataset, we know that no predictors are important, therefore the algorithms should be choosing zero variables when using the simulated dataset one. When looking at the simulated dataset three, there are exactly 24 variables with nonzero effect sizes. Since there is no correlation between predictors in this model, those 24 variables should be the only variables chosen as important. Understanding which variables we expect to be chosen for the simulated dataset two is more difficult due to the correlation between the predictors. There is currently disagreement in the field of data science, surrounding whether choosing variables as important, which have no effect size of their own, but are highly correlated with a variable with an effect size, is a good or bad thing. Some authors define relevant predictors as not only the variables that directly impact the response, but also the ones that are associated with the response due to correlation with a predictor that has it's own effect (Gregorutti, Michel & Saint-Pierre 2017). However, other scholars have specifically designed their algorithms to only select predictors that have their own effect and some others don’t even define what it means for a variable to be relevant. There is currently no clear consensus in the field on what the true effect of correlation on these importance measures means (Darst, Malecki & Engelman 2018).
+
+|           This lack of consensus likely stems from scholars having different reasons for using variable selection. If someone is simply looking to improve the overall accuracy of a model, they would want to include all predictors that increase that accuracy, even if they don’t have their own effect. However, if someone is trying to understand which variables have the most direct impact on the response, the selection of highly correlated variables that do not have their own effect would be undesirable (Darst, Malecki & Engelman 2018). For example, in medical research if someone is trying to determine which risk factors are directly linked to a disease, including factors that have no impact on the disease but are correlated to the risk factors could be unhelpful. 
+
+|           For the second simulated dataset, the important predictors will be considered in this report to be those that were originally given an effect size, along with any variables that are highly correlated with an initially important variable. Variables that had a correlation of 0.6 or higher with an initially relevant variable were selected. This resulted in 49 variables being deemed as important for simulation two. This decision was made because including the predictors that are highly correlated but don't have their own effect, improves the accuracy of the models, meaning that models with these correlated predictors can more accurately predict hospital deaths. Since this is the intended goal, the report will look to see which algorithms choose all 49 important variables for this third simulated dataset. 
+
+|           Model Accuracy, AUC, computation time, and correct variable selection will be investigated for the algorithms across the different simulations, in an attempt to see which algorithms consistently perform the best across a wide variety of datatypes. Default parameters were used for all algorithms except for VarSelRF and RFE, which had a ntree of 1000 instead of 5000, and an ntreeIterat of 500 instead of 2000. Changing these parameters made them more similar to the other models parameters, and there was not a large fear of losing too much accuracy by lowering them, because the authors of VarSelRF and RFE use a large range of parameters as examples, including ones lower than those being used in this report.
+
+## Results
+
+```{r RFE real, eval=FALSE}
+library(varSelRF)
+startTimerfe <- Sys.time()
+rf.vs <- varSelRF(datax, datay, ntree = 1000, ntreeIterat = 500, vars.drop.frac = 0.2, recompute.var.imp = TRUE)
+rf.vs$selected.vars
+rf.vs$selected.model
+endTimerfe <- Sys.time()
+startTimerfe
+endTimerfe
+```
+
+```{r RFE simulated one, eval=FALSE}
+library(varSelRF)
+startTimerfe1 <- Sys.time()
+rf.vs <- varSelRF(simdata1x, simdata1y, ntree = 1000, ntreeIterat = 500, vars.drop.frac = 0.2, recompute.var.imp = TRUE)
+rf.vs$selected.vars
+rf.vs$selected.model
+endTimerfe1 <- Sys.time()
+startTimerfe1
+endTimerfe1
+```
+
+```{r RFE simulated two, eval=FALSE}
+library(varSelRF)
+startTimerfe2 <- Sys.time()
+rf.vs <- varSelRF(simdata2x, simdata2y, ntree = 1000, ntreeIterat = 500, vars.drop.frac = 0.2, recompute.var.imp = TRUE)
+rf.vs$selected.vars
+rf.vs$selected.model
+endTimerfe2 <- Sys.time()
+startTimerfe2
+endTimerfe2
+```
+
+```{r RFE simulated three, eval=FALSE}
+library(varSelRF)
+startTimerfe3 <- Sys.time()
+rf.vs <- varSelRF(simdata3x, simdata3y, ntree = 1000, ntreeIterat = 500, vars.drop.frac = 0.2, recompute.var.imp = TRUE)
+rf.vs$selected.vars
+rf.vs$selected.model
+endTimerfe3 <- Sys.time()
+startTimerfe3
+endTimerfe3
+```
+
+```{r valselrf real, eval=FALSE}
+library(varSelRF)
+startTimevarsel <- Sys.time()
+rf.vs <- varSelRF(datax, datay, ntree = 1000, ntreeIterat = 500, vars.drop.frac = 0.2, recompute.var.imp = FALSE)
+rf.vs$selected.vars
+rf.vs$selected.model
+endTimevarsel <- Sys.time()
+startTimevarsel
+endTimevarsel
+```
+
+```{r valselrf simulated one, eval=FALSE}
+library(varSelRF)
+startTimevarsel1 <- Sys.time()
+rf.vs1 <- varSelRF(simdata1x, simdata1y, ntree = 1000, ntreeIterat = 500, vars.drop.frac = 0.2, recompute.var.imp = FALSE)
+rf.vs1$selected.vars
+rf.vs1$selected.model
+endTimevarsel1 <- Sys.time()
+startTimevarsel1
+endTimevarsel1
+```
+
+```{r valselrf simulated two, eval=FALSE}
+library(varSelRF)
+startTimevarsel2 <- Sys.time()
+rf.vs2 <- varSelRF(simdata2x, simdata2y, ntree = 1000, ntreeIterat = 500, vars.drop.frac = 0.2, recompute.var.imp = FALSE)
+rf.vs2$selected.vars
+rf.vs2$selected.model
+endTimevarsel2 <- Sys.time()
+startTimevarsel2
+endTimevarsel2
+```
+
+```{r valselrf simulated three, eval=FALSE}
+library(varSelRF)
+startTimevarsel3 <- Sys.time()
+rf.vs3 <- varSelRF(simdata3x, simdata3y, ntree = 1000, ntreeIterat = 500, vars.drop.frac = 0.2, recompute.var.imp = FALSE)
+rf.vs3$selected.vars
+rf.vs3$selected.model
+endTimevarsel3 <- Sys.time()
+startTimevarsel3
+endTimevarsel3
+```
+
+```{r Vita real, eval=FALSE}
+library(vita)
+startTimenewvita <- Sys.time()
+cv_vi = CVPVI(datax,datay,k = 2,mtry = 3,ntree = 500,ncores = 2)
+cv_p = NTA(cv_vi$cv_varim)
+summary(cv_p,pless = 0.01)
+endTimevita <- Sys.time()
+startTimevita
+endTimevita
+```
+
+```{r vita simulated one, eval=FALSE}
+library(vita)
+startTimevita1 <- Sys.time()
+cv_vi1 = CVPVI(simdata1x,simdata1y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+cv_p1 = NTA(cv_vi1$cv_varim)
+summary(cv_p1,pless = 0.01)
+endTimevita1 <- Sys.time()
+startTimevita1
+endTimevita1
+```
+
+```{r vita simulated two, eval=FALSE}
+library(vita)
+cv_vi2 = CVPVI(simdata2x,simdata2y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+cv_vi2$cv_varim
+cv_p2 = NTA(cv_vi2$cv_varim)
+summary(cv_p2,pless = 0.1)
+```
+
+```{r vita simulated three, eval=FALSE}
+library(vita)
+startTimevita3 <- Sys.time()
+cv_vi3 = CVPVI(simdata3x,simdata3y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+cv_p3 = NTA(cv_vi3$cv_varim)
+summary(cv_p3,pless = 0.01)
+endTimevita3 <- Sys.time()
+startTimevita3
+endTimevita3
+```
+
+```{r new vita real, eval=FALSE}
+library(vita)
+startTimenewvita <- Sys.time()
+cv_vi = CVPVI(datax,datay,k = 2,mtry = 3,ntree = 500,ncores = 2)
+cv_p = NTA(cv_vi$cv_varim)
+negzero<-which(cv_vi$cv_varim<=0)
+dataxvita<-datax
+if (length(negzero) < 30) {
+  b = ((30-length(negzero))*2.25)
+  b
+  for (i in 1:b) {
+    x<-dataxvita[[i]]
+    y <-sample(x)
+    dataxvita[ , ncol(dataxvita) +1 ] <- y
+    colnames(dataxvita)[ncol(dataxvita)]  <- paste0(names(dataxvita)[i],"shadow")
+  }
+  cv_vi = CVPVI(dataxvita,datay,k = 2,mtry = 3,ntree = 500,ncores = 2)
+  negzero<-which(cv_vi$cv_varim<=0)
+  scores<-data.frame(cv_vi$cv_varim)
+  size<-nrow(scores)
+  allvitanonshadow <- scores %>%  filter(!row_number() %in% c(74:size))
+  allvitashadow <- scores %>%  filter(!row_number() %in% c(1:73))
+  allvitatrueshadow <- allvitashadow %>%  filter(allvitashadow<=0)
+  vitascores <- rbind(allvitatrueshadow, allvitanonshadow) 
+  scores <- vitascores$CV_PerVarImp
+  scores <-array(scores)
+  names <-rownames(vitascores)
+    names <- list(names)
+  dimnames(scores)<- names
+  cv_p = NTA(scores)
+  summary(cv_p,pless = 0.01)
+} else {
+  cv_p = NTA(cv_vi$cv_varim)
+  summary(cv_p,pless = 0.01) }
+
+endTimenewvita <- Sys.time()
+startTimenewvita
+endTimenewvita
+```
+
+
+```{r new vita sim1, eval=FALSE}
+library(vita)
+startTimenewvita1 <- Sys.time()
+cv_vi1 = CVPVI(simdata1x,simdata1y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+negzero<-which(cv_vi1$cv_varim<=0)
+simdata1xvita<-simdata1x
+if (length(negzero) < 30) {
+  b = ((30-length(negzero))*2.25)
+  b
+  for (i in 1:b) {
+    x<-simdata1xvita[[i]]
+    y <-sample(x)
+    simdata1xvita[ , ncol(simdata1xvita) +1 ] <- y
+    colnames(simdata1xvita)[ncol(simdata1xvita)]  <- paste0(names(simdata1xvita)[i],"shadow")
+  }
+  cv_vi1 = CVPVI(simdata1xvita,simdata1y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+  negzero<-which(cv_vi1$cv_varim<=0)
+  scores<-data.frame(cv_vi1$cv_varim)
+  size<-nrow(scores)
+  allvitanonshadow <- scores %>%  filter(!row_number() %in% c(74:size))
+  allvitashadow <- scores %>%  filter(!row_number() %in% c(1:73))
+  allvitatrueshadow <- allvitashadow %>%  filter(allvitashadow<=0)
+  vitascores <- rbind(allvitatrueshadow, allvitanonshadow) 
+  scores <- vitascores$CV_PerVarImp
+  scores <-array(scores)
+  names <-rownames(vitascores)
+    names <- list(names)
+  dimnames(scores)<- names
+  cv_p1 = NTA(scores)
+  summary(cv_p1,pless = 0.01)
+} else {
+  cv_p1 = NTA(cv_vi1$cv_varim)
+  summary(cv_p1,pless = 0.01) }
+
+endTimenewvita1 <- Sys.time()
+startTimenewvita1
+endTimenewvita1
+```
+
+
+```{r new vita sim2, eval=FALSE}
+library(vita)
+startTimenewvita2 <- Sys.time()
+cv_vi2 = CVPVI(simdata2x,simdata2y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+negzero<-which(cv_vi2$cv_varim<=0)
+simdata2xvita<-simdata2x
+if (length(negzero) < 30) {
+  b = ((30-length(negzero))*2.25)
+  b
+  for (i in 1:b) {
+    x<-simdata2xvita[[i]]
+    y <-sample(x)
+    simdata2xvita[ , ncol(simdata2xvita) +1 ] <- y
+    colnames(simdata2xvita)[ncol(simdata2xvita)]  <- paste0(names(simdata2xvita)[i],"shadow")
+  }
+  cv_vi2 = CVPVI(simdata2xvita,simdata2y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+  negzero<-which(cv_vi2$cv_varim<=0)
+  scores<-data.frame(cv_vi2$cv_varim)
+  size<-nrow(scores)
+  allvitanonshadow <- scores %>%  filter(!row_number() %in% c(74:size))
+  allvitashadow <- scores %>%  filter(!row_number() %in% c(1:73))
+  allvitatrueshadow <- allvitashadow %>%  filter(allvitashadow<=0)
+  vitascores <- rbind(allvitatrueshadow, allvitanonshadow) 
+  scores <- vitascores$CV_PerVarImp
+  scores <-array(scores)
+  names <-rownames(vitascores)
+    names <- list(names)
+  dimnames(scores)<- names
+  cv_p2 = NTA(scores)
+  summary(cv_p2,pless = 0.01)
+} else {
+  cv_p2 = NTA(cv_vi2$cv_varim)
+  summary(cv_p2,pless = 0.01) }
+
+endTimenewvita2 <- Sys.time()
+startTimenewvita2
+endTimenewvita2
+```
+
+```{r new vita sim3, eval=FALSE}
+library(vita)
+startTimenewvita3 <- Sys.time()
+cv_vi3 = CVPVI(simdata3x,simdata3y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+negzero<-which(cv_vi3$cv_varim<=0)
+simdata3xvita<-simdata3x
+if (length(negzero) < 30) {
+  b = ((30-length(negzero))*2.25)
+  b
+  for (i in 1:b) {
+    x<-simdata3xvita[[i]]
+    y <-sample(x)
+    simdata3xvita[ , ncol(simdata3xvita) +1 ] <- y
+    colnames(simdata3xvita)[ncol(simdata3xvita)]  <- paste0(names(simdata3xvita)[i],"shadow")
+  }
+  cv_vi3 = CVPVI(simdata3xvita,simdata3y,k = 2,mtry = 3,ntree = 500,ncores = 2)
+  negzero<-which(cv_vi3$cv_varim<=0)
+  scores<-data.frame(cv_vi3$cv_varim)
+  size<-nrow(scores)
+  allvitanonshadow <- scores %>%  filter(!row_number() %in% c(74:size))
+  allvitashadow <- scores %>%  filter(!row_number() %in% c(1:73))
+  allvitatrueshadow <- allvitashadow %>%  filter(allvitashadow<=0)
+  vitascores <- rbind(allvitatrueshadow, allvitanonshadow) 
+  scores <- vitascores$CV_PerVarImp
+  scores <-array(scores)
+  names <-rownames(vitascores)
+  names <- list(names)
+  dimnames(scores)<- names
+  cv_p3 = NTA(scores)
+  summary(cv_p3,pless = 0.01)
+} else {
+  cv_p3 = NTA(cv_vi3$cv_varim)
+  summary(cv_p3,pless = 0.01) }
+
+endTimenewvita3 <- Sys.time()
+startTimenewvita3
+endTimenewvita3
+```
+
+```{r perm real, eval=FALSE}
+library(randomForest)
+startTimeperm <- Sys.time()
+rf <- randomForest(hospital_deaths ~ ., data=data, ntree=1000, keep.forest=TRUE, importance=TRUE , keep.inbag=TRUE)
+importance<-compVarImp(datax,datay,rf)
+importance
+endTimeperm <- Sys.time()
+startTimeperm
+endTimeperm
+```
+
+```{r perm simulated one, eval=FALSE}
+library(randomForest)
+startTimeperm1 <- Sys.time()
+rf1 <- randomForest(hospital_deaths ~ ., data=simdata1, ntree=1000, keep.forest=TRUE, importance=TRUE , keep.inbag=TRUE)
+importance1<-compVarImp(simdata2x,simdata1y,rf1)
+importance1
+endTimeperm1 <- Sys.time()
+startTimeperm1
+endTimeperm1
+```
+
+```{r perm simulated two, eval=FALSE}
+library(randomForest)
+startTimeperm2 <- Sys.time()
+rf2 <- randomForest(hospital_deaths ~ ., data=simdata2, ntree=1000, keep.forest=TRUE, importance=TRUE , keep.inbag=TRUE)
+importance2<-compVarImp(simdata2x,simdata2y,rf2)
+importance2
+endTimeperm2 <- Sys.time()
+startTimeperm2
+endTimeperm2
+```
+
+```{r perm simulated three, eval=FALSE}
+library(randomForest)
+startTimeperm3 <- Sys.time()
+rf3 <- randomForest(hospital_deaths ~ ., data=simdata3, ntree=1000, keep.forest=TRUE, importance=TRUE , keep.inbag=TRUE)
+importance3<-compVarImp(simdata3x,simdata3y,rf3)
+importance3
+endTimeperm3 <- Sys.time()
+startTimeperm3
+endTimeperm3
+```
+
+
+```{r VSURF real, eval=FALSE}
+library(VSURF)
+startTimevsurf<- Sys.time()
+data.vsurf <- VSURF(x = datax, y = datay, ntree = 500, nfor.thres = 20,
+                       nfor.interp = 10, nfor.pred = 10)
+
+data.vsurf$varselect.thres 
+data.vsurf$varselect.interp    
+data.vsurf$varselect.pred
+endTimevsurf<- Sys.time()
+startTimevsurf
+endTimevsurf
+```
+
+```{r VSURF simulated one, eval=FALSE}
+library(VSURF)
+startTimevsurf1<- Sys.time()
+data1.vsurf <- VSURF(x = simdata1x, y = simdata1y, ntree = 500, nfor.thres = 20,
+                       nfor.interp = 10, nfor.pred = 10)
+
+data1.vsurf$varselect.thres 
+data1.vsurf$varselect.interp    
+data1.vsurf$varselect.pred
+endTimevsurf1<- Sys.time()
+startTimevsurf1
+endTimevsurff1
+```
+
+```{r VSURF simulated two, eval=FALSE}
+library(VSURF)
+startTimevsurf2<- Sys.time()
+data2.vsurf <- VSURF(x = simdata2x, y = simdata2y, ntree = 500, nfor.thres = 20,
+                       nfor.interp = 10, nfor.pred = 10)
+
+data2.vsurf$varselect.thres 
+data2.vsurf$varselect.interp    
+data2.vsurf$varselect.pred 
+endTimevsurf2<- Sys.time()
+startTimevsurf2
+endTimevsurff2
+```
+
+```{r VSURF simulated three, eval=FALSE}
+library(VSURF)
+startTimevsurf3<- Sys.time()
+data3.vsurf <- VSURF(x = simdata3x, y = simdata3y, ntree = 500, nfor.thres = 20,
+                       nfor.interp = 10, nfor.pred = 10)
+
+data3.vsurf$varselect.thres 
+data3.vsurf$varselect.interp    
+data3.vsurf$varselect.pred 
+endTimevsurf3<- Sys.time()
+startTimevsurf3
+endTimevsurf3
+```
+
+```{r altmann real, eval=FALSE}
+library(vita)
+library(randomForest)
+startTimealtmann<- Sys.time()
+rf = randomForest(datax, datay, ntree=500, importance=TRUE)
+pimp.varImp.cl<-PIMP(datax,datay,rf,S=100, parallel=TRUE, ncores=6, seed=12092000)
+pimp.t.cl = PimpTest(pimp.varImp.cl,para = TRUE)
+summary(pimp.t.cl,pless = 0.01)
+endTimealtmann<- Sys.time()
+startTimealtmann
+endTimealtmann
+```
+
+```{r altmann simulated one, eval=FALSE}
+library(vita)
+library(randomForest)
+startTimealtmann1<- Sys.time()
+rf1 = randomForest(simdata1x, simdata1y, ntree=500, importance=TRUE)
+pimp.varImp.cl1<-PIMP(simdata1x,simdata1y,rf1,S=100, parallel=TRUE, ncores=6, seed=12092000)
+pimp.t.cl1 = PimpTest(pimp.varImp.cl1,para = TRUE)
+summary(pimp.t.cl1,pless = 0.01)
+endTimealtmann1<- Sys.time()
+startTimealtmann1
+endTimealtmann1
+```
+
+```{r altmann simulated two, eval=FALSE}
+library(vita)
+library(randomForest)
+startTimealtmann2<- Sys.time()
+rf2 = randomForest(simdata2x, simdata2y, ntree=500, importance=TRUE)
+pimp.varImp.cl2<-PIMP(simdata2x,simdata2y,rf2,S=100, parallel=TRUE, ncores=6, seed=12092000)
+pimp.t.cl2 = PimpTest(pimp.varImp.cl2,para = TRUE)
+summary(pimp.t.cl2,pless = 0.01)
+endTimealtmann2<- Sys.time()
+startTimealtmann2
+endTimealtmann2
+```
+
+```{r altmann simulated three, eval=FALSE}
+library(vita)
+library(randomForest)
+startTimealtmann3<- Sys.time()
+rf3 = randomForest(simdata3x, simdata3y, ntree=500, importance=TRUE)
+pimp.varImp.cl3<-PIMP(simdata3x,simdata3y,rf3,S=100, parallel=TRUE, ncores=6, seed=12092000)
+pimp.t.cl3 = PimpTest(pimp.varImp.cl3,para = TRUE)
+summary(pimp.t.cl3,pless = 0.01)
+endTimealtmann3<- Sys.time()
+startTimealtmann3
+endTimealtmann3
+```
+
+```{r boruta real, eval=FALSE}
+library(Boruta)
+startTimeboruta <- Sys.time()
+Boruta <- Boruta(
+      datax,
+      datay,
+      pValue = 0.01,
+      mcAdj = TRUE,
+      maxRuns = 99,
+      doTrace = 0,
+      holdHistory = TRUE,
+      getImp = getImpRfZ
+)
+print(Boruta)
+Boruta$finalDecision
+endTimeboruta <- Sys.time()
+startTimeboruta
+endTimeboruta
+```
+
+
+```{r boruta simulated one, eval=FALSE}
+library(Boruta)
+startTimeboruta1 <- Sys.time()
+Boruta1 <- Boruta(
+      simdata1x,
+      simdata1y,
+      pValue = 0.01,
+      mcAdj = TRUE,
+      maxRuns = 99,
+      doTrace = 0,
+      holdHistory = TRUE,
+      getImp = getImpRfZ
+)
+print(Boruta1)
+Boruta1$finalDecision
+endTimeboruta1 <- Sys.time()
+startTimeboruta1
+endTimeboruta1
+```
+
+```{r boruta simulated two, eval=FALSE}
+library(Boruta)
+startTimeboruta2 <- Sys.time()
+Boruta2 <- Boruta(
+      simdata2x,
+      simdata2y,
+      pValue = 0.01,
+      mcAdj = TRUE,
+      maxRuns = 99,
+      doTrace = 0,
+      holdHistory = TRUE,
+      getImp = getImpRfZ
+)
+print(Boruta2)
+Boruta2$finalDecision
+endTimeboruta2 <- Sys.time()
+startTimeboruta2
+endTimeboruta2
+```
+
+```{r boruta simulated three, eval=FALSE}
+library(Boruta)
+startTimeboruta3 <- Sys.time()
+Boruta3 <- Boruta(
+      simdata3x,
+      simdata3y,
+      pValue = 0.01,
+      mcAdj = TRUE,
+      maxRuns = 99,
+      doTrace = 0,
+      holdHistory = TRUE,
+      getImp = getImpRfZ
+)
+print(Boruta3)
+Boruta3$finalDecision
+endTimeboruta3 <- Sys.time()
+startTimeboruta3
+endTimeboruta3
+```
+
+```{r real model accuracy, eval=FALSE}
+library(pROC)
+set.seed(12092000)
+train_index <- createDataPartition(data$hospital_deaths, p = 0.8, list = FALSE) # split available data into 80% training and 20% test datasets
+data_train <- data[train_index,]   
+data_test <- data[-train_index,]
+
+realvita <- glm(data = data_train, hospital_deaths ~ h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_max + h1_resprate_min + h1_spo2_max + h1_spo2_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + ethnicity + gender + height + icu_admit_source + icu_type + icu_id + pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + gcs_eyes_apache+ gcs_motor_apache + gcs_verbal_apache + heart_rate_apache + intubated_apache + map_apache + resprate_apache + temp_apache + ventilated_apache + d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_max+ d1_heartrate_min+ d1_mbp_max+ d1_mbp_min+ d1_mbp_noninvasive_max+ d1_mbp_noninvasive_min+ d1_resprate_max+ d1_resprate_min+ d1_spo2_max+ d1_spo2_min+ d1_sysbp_max+ d1_sysbp_min+ d1_sysbp_noninvasive_max+ d1_sysbp_noninvasive_min+ d1_temp_max+ d1_temp_min+ h1_diasbp_max+ h1_diasbp_min+ d1_glucose_max + d1_glucose_min + d1_potassium_max + d1_potassium_min + apache_4a_hospital_death_prob+ apache_4a_icu_death_prob + apache_3j_bodysystem + apache_2_bodysystem + diabetes_mellitus + hospital_id + age + bmi + elective_surgery , family = "binomial")
+realvitapreds <- predict(realvita, data_test, "response")
+realvitapreds <- ifelse(realvitapreds > .5, 1, 0)
+realvitaaccuracy <- mean(realvitapreds == data_test$hospital_deaths)
+auc(data_test$hospital_deaths, realvitapreds)
+realvitaaccuracy
+table(realvitapreds, data_test$hospital_deaths)
+
+realnewvita <- glm(data = data_train, hospital_deaths ~ h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_max + h1_resprate_min + h1_spo2_max + h1_spo2_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + ethnicity +  icu_admit_source + icu_id + icu_type + pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + gcs_eyes_apache+ gcs_motor_apache + gcs_verbal_apache + heart_rate_apache + intubated_apache + map_apache + resprate_apache + temp_apache + ventilated_apache + d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_max+ d1_heartrate_min+ d1_mbp_max+ d1_mbp_min+ d1_mbp_noninvasive_max+ d1_mbp_noninvasive_min+ d1_resprate_max+ d1_resprate_min+ d1_spo2_max+ d1_spo2_min+ d1_sysbp_max+ d1_sysbp_min+ d1_sysbp_noninvasive_max+ d1_sysbp_noninvasive_min+ d1_temp_max+ d1_temp_min+ h1_diasbp_max+ h1_diasbp_min + d1_glucose_max + d1_glucose_min + d1_potassium_max + d1_potassium_min + apache_4a_hospital_death_prob+ apache_4a_icu_death_prob + apache_3j_bodysystem + apache_2_bodysystem + hospital_id + age + bmi + elective_surgery , family = "binomial")
+realnewvitapreds <- predict(realnewvita, data_test, "response")
+realnewvitapreds <- ifelse(realnewvitapreds > .5, 1, 0)
+realnewvitaaccuracy <- mean(realnewvitapreds == data_test$hospital_deaths)
+auc(data_test$hospital_deaths, realnewvitapreds)
+realnewvitaaccuracy
+table(realnewvitapreds, data_test$hospital_deaths)
+
+realboruta <- glm(data = data_train, hospital_deaths ~ h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_max + h1_resprate_min + h1_spo2_max + h1_spo2_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min  + icu_admit_source + icu_id + pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + gcs_eyes_apache+ gcs_motor_apache + gcs_verbal_apache + heart_rate_apache + intubated_apache + map_apache + resprate_apache + temp_apache + ventilated_apache + d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_max+ d1_heartrate_min+ d1_mbp_max+ d1_mbp_min+ d1_mbp_noninvasive_max+ d1_mbp_noninvasive_min+ d1_resprate_max+ d1_resprate_min+ d1_spo2_max+ d1_spo2_min+ d1_sysbp_max+ d1_sysbp_min+ d1_sysbp_noninvasive_max+ d1_sysbp_noninvasive_min+ d1_temp_max+ d1_temp_min+ h1_diasbp_max+ h1_diasbp_min+  apache_2_bodysystem + d1_glucose_max + d1_glucose_min + d1_potassium_max + d1_potassium_min + apache_4a_hospital_death_prob+ apache_4a_icu_death_prob + apache_3j_bodysystem  + age + bmi + elective_surgery , family = "binomial")
+realborutapreds <- predict(realboruta, data_test, "response")
+realborutapreds <- ifelse(realborutapreds > .5, 1, 0)
+realborutaaccuracy <- mean(realborutapreds == data_test$hospital_deaths)
+realborutaaccuracy
+auc(data_test$hospital_deaths, realborutapreds)
+table(realborutapreds, data_test$hospital_deaths)
+
+realaltmann <- glm(data = data_train, hospital_deaths ~ apache_post_operative + gcs_eyes_apache + gcs_motor_apache + gcs_verbal_apache + intubated_apache + ventilated_apache + apache_4a_hospital_death_prob + apache_4a_icu_death_prob, family = "binomial")
+realaltmannpreds <- predict(realaltmann, data_test, "response")
+realaltmannpreds <- ifelse(realaltmannpreds > .5, 1, 0)
+realaltmannaccuracy <- mean(realaltmannpreds == data_test$hospital_deaths)
+realaltmannaccuracy
+auc(data_test$hospital_deaths, realaltmannpreds)
+table(realaltmannpreds, data_test$hospital_deaths)
+
+realVSURFinterpretation <- glm(data = data_train, hospital_deaths ~ age + bmi + apache_3j_diagnosis + gcs_motor_apache + gcs_verbal_apache + d1_diasbp_min + d1_diasbp_noninvasive_min + d1_mbp_min + d1_heartrate_min + d1_mbp_noninvasive_min + d1_resprate_min + d1_spo2_min + d1_sysbp_max + d1_sysbp_min + d1_sysbp_noninvasive_min + d1_sysbp_noninvasive_max + d1_temp_min + h1_diasbp_noninvasive_max + h1_diasbp_max + h1_diasbp_min + h1_diasbp_noninvasive_min + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_sysbp_min + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + apache_4a_hospital_death_prob + apache_4a_icu_death_prob + weight, family = "binomial")
+realVSURFinterpretationpreds <- predict(realVSURFinterpretation, data_test, "response")
+realVSURFinterpretationpreds <- ifelse(realVSURFinterpretationpreds > .5, 1, 0)
+realVSURFinterpretationaccuracy <- mean(realVSURFinterpretationpreds == data_test$hospital_deaths)
+realVSURFinterpretationaccuracy
+auc(data_test$hospital_deaths, realVSURFinterpretationpreds)
+table(realVSURFinterpretationpreds, data_test$hospital_deaths)
+
+realVSURFprediction <- glm(data = data_train, hospital_deaths ~ gcs_motor_apache + d1_spo2_min + apache_4a_icu_death_prob, family = "binomial")
+realVSURFpredictionpreds <- predict(realVSURFprediction, data_test, "response")
+realVSURFpredictionpreds <- ifelse(realVSURFpredictionpreds > .5, 1, 0)
+realVSURFpredictionaccuracy <- mean(realVSURFpredictionpreds == data_test$hospital_deaths)
+realVSURFpredictionaccuracy
+auc(data_test$hospital_deaths, realVSURFpredictionpreds)
+table(realVSURFpredictionpreds, data_test$hospital_deaths)
+
+realVarSelRF <- glm(data = data_train, hospital_deaths ~ apache_4a_hospital_death_prob + apache_4a_icu_death_prob + d1_sysbp_min + h1_mbp_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min, family = "binomial")
+realVarSelRFpreds <- predict(realVarSelRF, data_test, "response")
+realVarSelRFpreds <- ifelse(realVarSelRFpreds > .5, 1, 0)
+realVarSelRFaccuracy <- mean(realVarSelRFpreds == data_test$hospital_deaths)
+realVarSelRFaccuracy
+auc(data_test$hospital_deaths, realVarSelRFpreds)
+table(realVarSelRFpreds, data_test$hospital_deaths)
+
+realpermutation <- glm(data = data_train, hospital_deaths ~ apache_4a_hospital_death_prob + apache_4a_icu_death_prob, family = "binomial")
+realpermutationpreds <- predict(realpermutation, data_test, "response")
+realpermutationpreds <- ifelse(realpermutationpreds > .5, 1, 0)
+realpermutationaccuracy <- mean(realpermutationpreds == data_test$hospital_deaths)
+realpermutationaccuracy
+auc(data_test$hospital_deaths, realpermutationpreds)
+table(realpermutationpreds, data_test$hospital_deaths)
+
+realRFE <- glm(data = data_train, hospital_deaths ~ apache_3j_diagnosis + apache_4a_hospital_death_prob + apache_4a_icu_death_prob + d1_diasbp_max + d1_diasbp_min + d1_diasbp_noninvasive_max + d1_diasbp_noninvasive_min + d1_heartrate_max + d1_heartrate_min + d1_mbp_max + d1_mbp_min + d1_mbp_noninvasive_max + d1_mbp_noninvasive_min + d1_spo2_min + d1_sysbp_max + d1_sysbp_min + d1_sysbp_noninvasive_max + d1_sysbp_noninvasive_min + d1_temp_min + gcs_motor_apache + gcs_verbal_apache + h1_diasbp_max + h1_diasbp_min + h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + heart_rate_apache + map_apache, family = "binomial")
+realRFEpreds <- predict(realRFE, data_test, "response")
+realRFEpreds <- ifelse(realRFEpreds > .5, 1, 0)
+realRFEaccuracy <- mean(realRFEpreds == data_test$hospital_deaths)
+realRFEaccuracy
+auc(data_test$hospital_deaths, realRFEpreds)
+table(realRFEpreds, data_test$hospital_deaths)
+```
+
+```{r sim1 model accuracy, eval=FALSE}
+set.seed(12345)
+train_index <- createDataPartition(simdata1$hospital_deaths, p = 0.8, list = FALSE) # split available data into 80% training and 20% test datasets
+simdata1_train <- simdata1[train_index,]   
+simdata1_test <- simdata1[-train_index,]
+
+sim1vita <- glm(data = simdata1_train, hospital_deaths ~ h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + icu_admit_source + icu_id +  pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + gcs_eyes_apache+ gcs_motor_apache + gcs_verbal_apache + heart_rate_apache + intubated_apache + map_apache + resprate_apache + temp_apache + ventilated_apache + d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_max+ d1_heartrate_min+ d1_mbp_max+ d1_mbp_min+ d1_mbp_noninvasive_max+ d1_mbp_noninvasive_min+ d1_resprate_max+ d1_resprate_min+  d1_spo2_min+ d1_sysbp_max+ d1_sysbp_min+ d1_sysbp_noninvasive_max+ d1_sysbp_noninvasive_min+ d1_temp_max+ d1_temp_min+ h1_diasbp_max+ h1_diasbp_min+  apache_2_bodysystem + d1_glucose_max + d1_glucose_min + d1_potassium_max + d1_potassium_min + apache_4a_hospital_death_prob+ apache_4a_icu_death_prob + apache_3j_bodysystem + hospital_id + age + bmi + elective_surgery + h1_mbp_noninvasive_min + h1_resprate_max + h1_resprate_min + h1_spo2_max + h1_spo2_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + height , family = "binomial")
+sim1vitapreds <- predict(sim1vita, simdata1_test, "response")
+sim1vitapreds <- ifelse(sim1vitapreds > .5, 1, 0)
+sim1vitaaccuracy <- mean(sim1vitapreds == simdata1_test$hospital_deaths)
+sim1vitaaccuracy
+auc(simdata1_test$hospital_deaths, sim1vitapreds)
+table(sim1vitapreds, simdata1_test$hospital_deaths)
+
+sim1newvita <- glm(data = simdata1_train, hospital_deaths ~ h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + icu_admit_source + icu_id + pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + gcs_eyes_apache+ gcs_motor_apache + gcs_verbal_apache + heart_rate_apache +  map_apache + resprate_apache + temp_apache +  d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_max+ d1_heartrate_min+ d1_mbp_max+ d1_mbp_min+ d1_mbp_noninvasive_max+ d1_mbp_noninvasive_min+ d1_resprate_max+ d1_resprate_min+ d1_spo2_max+ d1_spo2_min+ d1_sysbp_max+ d1_sysbp_min+ d1_sysbp_noninvasive_max+ d1_sysbp_noninvasive_min+ d1_temp_max+ d1_temp_min+ h1_diasbp_max+ h1_diasbp_min+  apache_2_bodysystem + d1_glucose_max + d1_glucose_min + d1_potassium_max + d1_potassium_min + apache_4a_hospital_death_prob+ apache_4a_icu_death_prob + apache_3j_bodysystem +  age + bmi + elective_surgery + h1_mbp_noninvasive_min + h1_resprate_max + h1_resprate_min + h1_spo2_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min, family = "binomial")
+sim1newvitapreds <- predict(sim1newvita, simdata1_test, "response")
+sim1newvitapreds <- ifelse(sim1newvitapreds > .5, 1, 0)
+sim1newvitaaccuracy <- mean(sim1newvitapreds == simdata1_test$hospital_deaths)
+sim1newvitaaccuracy
+auc(simdata1_test$hospital_deaths, sim1newvitapreds)
+table(sim1newvitapreds, simdata1_test$hospital_deaths)
+
+sim1boruta <- glm(data = simdata1_train, hospital_deaths ~  h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_max + h1_resprate_min +  h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min  + icu_admit_source + icu_id + pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis +  gcs_motor_apache + heart_rate_apache + map_apache + resprate_apache + temp_apache  + d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_max+ d1_heartrate_min+ d1_mbp_max+ d1_mbp_min+ d1_mbp_noninvasive_max+ d1_mbp_noninvasive_min+ d1_resprate_max+ d1_resprate_min+  d1_spo2_min+ d1_sysbp_max+ d1_sysbp_min+ d1_sysbp_noninvasive_max+ d1_sysbp_noninvasive_min+  h1_diasbp_max+ d1_temp_max + d1_temp_min + h1_diasbp_min+  apache_2_bodysystem + d1_glucose_max + d1_glucose_min + d1_potassium_max + apache_4a_hospital_death_prob+ apache_4a_icu_death_prob + bmi , family = "binomial")
+
+sim1borutapreds <- predict(sim1boruta, simdata1_test, "response")
+sim1borutapreds <- ifelse(sim1borutapreds > .5, 1, 0)
+sim1borutaaccuracy <- mean(sim1borutapreds == simdata1_test$hospital_deaths)
+sim1borutaaccuracy
+auc(simdata1_test$hospital_deaths, sim1borutapreds)
+table(sim1borutapreds, simdata1_test$hospital_deaths)
+
+sim1altmann <- glm(data = simdata1_train, hospital_deaths ~  h1_mbp_min + h1_mbp_noninvasive_min  + h1_resprate_max +d1_temp_max + d1_temp_min +  icu_admit_source + temp_apache + apache_3j_diagnosis, family = "binomial")
+sim1altmannpreds <- predict(sim1altmann, simdata1_test, "response")
+sim1altmannpreds <- ifelse(sim1altmannpreds > .5, 1, 0)
+sim1altmannaccuracy <- mean(sim1altmannpreds == simdata1_test$hospital_deaths)
+sim1altmannaccuracy
+auc(simdata1_test$hospital_deaths, sim1altmannpreds)
+table(sim1altmannpreds, simdata1_test$hospital_deaths)
+
+sim1VSURFinterpretation <- glm(data = simdata1_train, hospital_deaths ~ h1_mbp_noninvasive_min, family = "binomial")
+sim1VSURFinterpretationpreds <- predict(sim1VSURFinterpretation, simdata1_test, "response")
+sim1VSURFinterpretationpreds <- ifelse(sim1VSURFinterpretationpreds > .5, 1, 0)
+sim1VSURFinterpretationaccuracy <- mean(sim1VSURFinterpretationpreds == simdata1_test$hospital_deaths)
+sim1VSURFinterpretationaccuracy
+auc(simdata1_test$hospital_deaths, sim1VSURFinterpretationpreds)
+table(sim1VSURFinterpretationpreds, simdata1_test$hospital_deaths)
+
+sim1VSURFprediction <- glm(data = simdata1_train, hospital_deaths ~ h1_mbp_noninvasive_min, family = "binomial")
+sim1VSURFpredictionpreds <- predict(sim1VSURFprediction, simdata1_test, "response")
+sim1VSURFpredictionpreds <- ifelse(sim1VSURFpredictionpreds > .5, 1, 0)
+sim1VSURFpredictionaccuracy <- mean(sim1VSURFpredictionpreds == simdata1_test$hospital_deaths)
+sim1VSURFpredictionaccuracy
+auc(simdata1_test$hospital_deaths, sim1VSURFpredictionpreds)
+table(sim1VSURFpredictionpreds, simdata1_test$hospital_deaths)
+
+sim1VarSelRF <- glm(data = simdata1_train, hospital_deaths ~ h1_mbp_min + h1_mbp_noninvasive_min, family = "binomial")
+sim1VarSelRFpreds <- predict(sim1VarSelRF, simdata1_test, "response")
+sim1VarSelRFpreds <- ifelse(sim1VarSelRFpreds > .5, 1, 0)
+sim1VarSelRFaccuracy <- mean(sim1VarSelRFpreds == simdata1_test$hospital_deaths)
+sim1VarSelRFaccuracy
+auc(simdata1_test$hospital_deaths, sim1VarSelRFpreds)
+table(sim1VarSelRFpreds, simdata1_test$hospital_deaths)
+
+sim1permutation <- glm(data = simdata1_train, hospital_deaths ~ patient_id + bmi+ + pre_icu_los_days + weight + d1_diasbp_max + d1_diasbp_noninvasive_max + d1_heartrate_max + apache_4a_hospital_death_prob + apache_4a_icu_death_prob + d1_sysbp_max + d1_sysbp_min + d1_sysbp_noninvasive_min + h1_diasbp_max + h1_diasbp_noninvasive_max + h1_heartrate_max + h1_mbp_max + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_max, family = "binomial")
+sim1permutationpreds <- predict(sim1permutation, simdata1_test, "response")
+sim1permutationpreds <- ifelse(sim1permutationpreds > .5, 1, 0)
+sim1permutationaccuracy <- mean(sim1permutationpreds == simdata1_test$hospital_deaths)
+sim1permutationaccuracy
+auc(simdata1_test$hospital_deaths, sim1permutationpreds)
+table(sim1permutationpreds, simdata1_test$hospital_deaths)
+
+sim1RFE <- glm(data = simdata1_train, hospital_deaths ~ h1_mbp_min + h1_mbp_noninvasive_min, family = "binomial")
+sim1RFEpreds <- predict(sim1RFE, simdata1_test, "response")
+sim1RFEpreds <- ifelse(sim1RFEpreds > .5, 1, 0)
+sim1RFEaccuracy <- mean(sim1RFEpreds == simdata1_test$hospital_deaths)
+sim1RFEaccuracy
+auc(simdata1_test$hospital_deaths, sim1RFEpreds)
+table(sim1RFEpreds, simdata1_test$hospital_deaths)
+```
+
+```{r sim2 model accuracy, eval=FALSE}
+set.seed(12345)
+train_index <- createDataPartition(simdata2$hospital_deaths, p = 0.8, list = FALSE) # split available data into 80% training and 20% test datasets
+simdata2_train <- simdata2[train_index,]   
+simdata2_test <- simdata2[-train_index,]
+
+sim2newvita <- glm(data = simdata2_train, hospital_deaths ~ h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + ethnicity + height + icu_admit_source + icu_id +  icu_type + pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + gcs_verbal_apache + heart_rate_apache + intubated_apache + map_apache + resprate_apache + temp_apache + ventilated_apache + d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_max+ d1_heartrate_min+ d1_mbp_max+ d1_mbp_min+ d1_mbp_noninvasive_max+ d1_mbp_noninvasive_min+ d1_resprate_max+ d1_resprate_min+  d1_spo2_min+ d1_spo2_max + d1_sysbp_max+ d1_sysbp_min+ d1_sysbp_noninvasive_max+ d1_sysbp_noninvasive_min+ d1_temp_max+ d1_temp_min+ h1_diasbp_max+ h1_diasbp_min+  apache_2_bodysystem + d1_glucose_max + d1_glucose_min + d1_potassium_max + d1_potassium_min + apache_4a_hospital_death_prob+ apache_4a_icu_death_prob + apache_3j_bodysystem + encounter_id + hospital_id + age + bmi + elective_surgery + h1_mbp_noninvasive_min + h1_resprate_max + h1_resprate_min + h1_spo2_max + h1_spo2_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min, family = "binomial")
+sim2newvitapreds <- predict(sim2newvita, simdata2_test, "response")
+sim2newvitapreds <- ifelse(sim2newvitapreds > .5, 1, 0)
+sim2newvitaaccuracy <- mean(sim2newvitapreds == simdata2_test$hospital_deaths)
+sim2newvitaaccuracy
+auc(simdata2_test$hospital_deaths, sim2newvitapreds)
+table(sim2newvitapreds, simdata2_test$hospital_deaths)
+
+sim2boruta <- glm(data = simdata2_train, hospital_deaths ~ encounter_id + ethnicity + height +  h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_max + h1_resprate_min + h1_spo2_max + h1_spo2_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min  + icu_admit_source + icu_id + pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + heart_rate_apache + intubated_apache + map_apache + resprate_apache + ventilated_apache + d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_max+ d1_heartrate_min+ d1_mbp_max+ d1_mbp_min+ d1_mbp_noninvasive_max+ d1_mbp_noninvasive_min+ d1_resprate_max+ d1_resprate_min+ d1_spo2_max+ d1_spo2_min+ d1_sysbp_max+ d1_sysbp_min+ d1_sysbp_noninvasive_max+ d1_sysbp_noninvasive_min+  h1_diasbp_max+ h1_diasbp_min+  apache_2_bodysystem + d1_glucose_max + d1_glucose_min + d1_potassium_max + d1_potassium_min + apache_4a_hospital_death_prob+ apache_4a_icu_death_prob + apache_3j_bodysystem + age + bmi + elective_surgery , family = "binomial")
+
+sim2borutapreds <- predict(sim2boruta, simdata2_test, "response")
+sim2borutapreds <- ifelse(sim2borutapreds > .5, 1, 0)
+sim2borutaaccuracy <- mean(sim2borutapreds == simdata2_test$hospital_deaths)
+sim2borutaaccuracy
+auc(simdata2_test$hospital_deaths, sim2borutapreds)
+table(sim2borutapreds, simdata2_test$hospital_deaths)
+
+sim2altmann <- glm(data = simdata2_train, hospital_deaths ~ encounter_id + age + bmi + elective_surgery + height + icu_admit_source + icu_id + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + gcs_eyes_apache + gcs_motor_apache + heart_rate_apache + intubated_apache + map_apache + ventilated_apache + d1_diasbp_max+ d1_diasbp_min+ d1_diasbp_noninvasive_max+ d1_diasbp_noninvasive_min+ d1_heartrate_min + d1_heartrate_max + d1_mbp_max + d1_mbp_min + d1_mbp_noninvasive_max + d1_mbp_noninvasive_min + d1_resprate_min+ d1_spo2_max + d1_spo2_min + d1_sysbp_max + d1_sysbp_min + d1_sysbp_noninvasive_max + d1_sysbp_noninvasive_min +  h1_diasbp_max + h1_diasbp_min + h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_min + h1_resprate_max  + h1_sysbp_min + h1_sysbp_max + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + d1_potassium_min+ d1_glucose_max + apache_4a_hospital_death_prob + apache_4a_icu_death_prob + diabetes_mellitus + apache_3j_bodysystem + apache_2_bodysystem, family = "binomial")
+sim2altmannpreds <- predict(sim2altmann, simdata2_test, "response")
+sim2altmannpreds <- ifelse(sim2altmannpreds > .5, 1, 0)
+sim2altmannaccuracy <- mean(sim2altmannpreds == simdata2_test$hospital_deaths)
+sim2altmannaccuracy
+auc(simdata2_test$hospital_deaths, sim2altmannpreds)
+table(sim2altmannpreds, simdata2_test$hospital_deaths)
+
+sim2VSURFinterpretation <- glm(data = simdata2_train, hospital_deaths ~  apache_3j_diagnosis + apache_post_operative +map_apache +d1_diasbp_max +d1_diasbp_noninvasive_max +d1_mbp_max +d1_mbp_noninvasive_max +d1_resprate_min +d1_spo2_max +d1_spo2_min +h1_diasbp_max +h1_diasbp_min +h1_diasbp_noninvasive_max +h1_diasbp_noninvasive_min +h1_heartrate_min +h1_mbp_max+h1_mbp_min +h1_mbp_noninvasive_max + h1_mbp_noninvasive_min +d1_glucose_max + age + bmi + elective_surgery + icu_admit_source + weight ,family = "binomial")
+sim2VSURFinterpretationpreds <- predict(sim2VSURFinterpretation, simdata2_test, "response")
+sim2VSURFinterpretationpreds <- ifelse(sim2VSURFinterpretationpreds > .5, 1, 0)
+sim2VSURFinterpretationaccuracy <- mean(sim2VSURFinterpretationpreds == simdata2_test$hospital_deaths)
+sim2VSURFinterpretationaccuracy
+auc(simdata2_test$hospital_deaths, sim2VSURFinterpretationpreds)
+table(sim2VSURFinterpretationpreds, simdata2_test$hospital_deaths)
+
+sim2VSURFprediction <- glm(data = simdata2_train, hospital_deaths ~ age + bmi + apache_3j_diagnosis + apache_post_operative + map_apache + d1_diasbp_noninvasive_max +d1_mbp_max + d1_resprate_min + d1_spo2_max + d1_spo2_min + h1_diasbp_noninvasive_max +h1_diasbp_max + h1_diasbp_noninvasive_min + h1_heartrate_min + d1_glucose_max, family = "binomial")
+sim2VSURFpredictionpreds <- predict(sim2VSURFprediction, simdata2_test, "response")
+sim2VSURFpredictionpreds <- ifelse(sim2VSURFpredictionpreds > .5, 1, 0)
+sim2VSURFpredictionaccuracy <- mean(sim2VSURFpredictionpreds == simdata2_test$hospital_deaths)
+sim2VSURFpredictionaccuracy
+auc(simdata2_test$hospital_deaths, sim2VSURFpredictionpreds)
+table(sim2VSURFpredictionpreds, simdata2_test$hospital_deaths)
+
+sim2VarSelRF <- glm(data = simdata2_train, hospital_deaths ~ age + apache_2_diagnosis + apache_3j_diagnosis + apache_4a_hospital_death_prob + apache_post_operative + bmi + d1_diasbp_max + d1_diasbp_min + d1_diasbp_noninvasive_max + d1_diasbp_noninvasive_min + d1_glucose_max + d1_mbp_max + d1_mbp_noninvasive_max + d1_resprate_min + d1_spo2_max + d1_spo2_min + d1_sysbp_max + d1_sysbp_noninvasive_max + elective_surgery + h1_diasbp_max + h1_diasbp_min + h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + heart_rate_apache + icu_admit_source + map_apache + weight, family = "binomial")
+sim2VarSelRFpreds <- predict(sim2VarSelRF, simdata2_test, "response")
+sim2VarSelRFpreds <- ifelse(sim2VarSelRFpreds > .5, 1, 0)
+sim2VarSelRFaccuracy <- mean(sim2VarSelRFpreds == simdata2_test$hospital_deaths)
+sim2VarSelRFaccuracy
+auc(simdata2_test$hospital_deaths, sim2VarSelRFpreds)
+table(sim2VarSelRFpreds, simdata2_test$hospital_deaths)
+
+sim2permutation <- glm(data = simdata2_train, hospital_deaths ~ encounter_id + age + bmi+ elective_surgery + icu_admit_source + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative+ heart_rate_apache + map_apache + d1_diasbp_max + d1_diasbp_min + d1_diasbp_noninvasive_max + d1_diasbp_noninvasive_min + d1_heartrate_max + d1_mbp_max + d1_mbp_noninvasive_max + d1_resprate_min + d1_spo2_max +  apache_4a_hospital_death_prob + d1_sysbp_max +  d1_sysbp_noninvasive_max + h1_diasbp_max + h1_diasbp_min + h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_resprate_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min +  d1_glucose_max, family = "binomial")
+sim2permutationpreds <- predict(sim2permutation, simdata2_test, "response")
+sim2permutationpreds <- ifelse(sim2permutationpreds > .5, 1, 0)
+sim2permutationaccuracy <- mean(sim2permutationpreds == simdata2_test$hospital_deaths)
+sim2permutationaccuracy
+auc(simdata2_test$hospital_deaths, sim2permutationpreds)
+table(sim2permutationpreds, simdata2_test$hospital_deaths)
+
+sim2RFE <- glm(data = simdata2_train, hospital_deaths ~ age + apache_2_diagnosis + apache_3j_diagnosis + apache_4a_hospital_death_prob + apache_post_operative + bmi + d1_diasbp_max + d1_diasbp_min + d1_diasbp_noninvasive_max + d1_diasbp_noninvasive_min + d1_glucose_max + d1_mbp_max + d1_mbp_noninvasive_max + d1_resprate_min + d1_spo2_max + d1_spo2_min + d1_sysbp_max + d1_sysbp_noninvasive_max + elective_surgery + h1_diasbp_max + h1_diasbp_min + h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_min + h1_sysbp_max + h1_sysbp_min + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min + icu_admit_source + map_apache + weight, family = "binomial")
+sim2RFEpreds <- predict(sim2RFE, simdata2_test, "response")
+sim2RFEpreds <- ifelse(sim2RFEpreds > .5, 1, 0)
+sim2RFEaccuracy <- mean(sim2RFEpreds == simdata2_test$hospital_deaths)
+sim2RFEaccuracy
+auc(simdata2_test$hospital_deaths, sim2RFEpreds)
+table(sim2RFEpreds, simdata2_test$hospital_deaths)
+
+sim2realmodel <- glm(data = simdata2_train, hospital_deaths ~  encounter_id + patient_id + age + bmi + elective_surgery  + icu_admit_source + pre_icu_los_days + weight + apache_2_diagnosis + apache_3j_diagnosis + apache_post_operative + gcs_eyes_apache + gcs_motor_apache + gcs_verbal_apache + heart_rate_apache + intubated_apache + map_apache + ventilated_apache + d1_diasbp_max + d1_diasbp_noninvasive_max + d1_heartrate_min + d1_heartrate_max + d1_mbp_max  + d1_mbp_noninvasive_max  + d1_resprate_min+ d1_spo2_max + d1_spo2_min + d1_sysbp_max + d1_sysbp_min + d1_sysbp_noninvasive_max + d1_sysbp_noninvasive_min +  h1_diasbp_max + h1_diasbp_noninvasive_max + h1_diasbp_noninvasive_min + h1_heartrate_max + h1_heartrate_min + h1_mbp_max + h1_mbp_min + h1_mbp_noninvasive_max + h1_mbp_noninvasive_min + h1_resprate_min  + h1_spo2_max  + h1_sysbp_min + h1_sysbp_max + h1_sysbp_noninvasive_max + h1_sysbp_noninvasive_min  + d1_glucose_max +d1_potassium_min + d1_potassium_max, family = "binomial")
+sim2realmodelpreds <- predict(sim2realmodel, simdata2_test, "response")
+sim2realmodelpreds <- ifelse(sim2realmodelpreds > .5, 1, 0)
+sim2realmodelaccuracy <- mean(sim2realmodelpreds == simdata2_test$hospital_deaths)
+sim2realmodelaccuracy
+auc(simdata2_test$hospital_deaths, sim2realmodelpreds)
+table(sim2realmodelpreds, simdata2_test$hospital_deaths)
+```
+
+```{r sim3 model accuracy, eval=FALSE}
+set.seed(12345)
+train_index <- createDataPartition(simdata3$hospital_deaths, p = 0.8, list = FALSE) # split available data into 80% training and 20% test datasets
+simdata3_train <- simdata3[train_index,]   
+simdata3_test <- simdata3[-train_index,]
+
+sim3vita <- glm(data = simdata3_train, hospital_deaths ~encounter_idnew + patient_idnew + bminew+ agenew+ pre_icu_los_daysnew + apache_post_operativenew+ gcs_verbal_apachenew + heart_rate_apachenew+ map_apachenew + resprate_apachenew + ventilated_apachenew  + d1_diasbp_noninvasive_maxnew + d1_heartrate_maxnew  + d1_mbp_maxnew  + d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew +  d1_sysbp_maxnew  + h1_diasbp_noninvasive_maxnew + h1_heartrate_minnew + h1_resprate_minnew + h1_spo2_maxnew  +h1_sysbp_minnew+ d1_glucose_maxnew + d1_potassium_maxnew, family = "binomial")
+sim3vitapreds <- predict(sim3vita, simdata3_test, "response")
+sim3vitapreds <- ifelse(sim3vitapreds > .5, 1, 0)
+sim3vitaaccuracy <- mean(sim3vitapreds == simdata3_test$hospital_deaths)
+sim3vitaaccuracy
+auc(simdata3_test$hospital_deaths, sim3vitapreds)
+table(sim3vitapreds, simdata3_test$hospital_deaths)
+
+sim3newvita <- glm(data = simdata3_train, hospital_deaths ~encounter_idnew + patient_idnew + bminew+ agenew+ apache_2_diagnosisnew+ apache_post_operativenew+ gcs_verbal_apachenew + map_apachenew +  ventilated_apachenew +  d1_diasbp_noninvasive_maxnew + d1_heartrate_maxnew + d1_mbp_maxnew + d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew +  d1_sysbp_maxnew + h1_diasbp_noninvasive_minnew + h1_diasbp_noninvasive_maxnew + h1_heartrate_minnew + h1_resprate_minnew + h1_sysbp_minnew + d1_glucose_maxnew, family = "binomial")
+sim3newvitapreds <- predict(sim3newvita, simdata3_test, "response")
+sim3newvitapreds <- ifelse(sim3newvitapreds > .5, 1, 0)
+sim3newvitaaccuracy <- mean(sim3newvitapreds == simdata3_test$hospital_deaths)
+sim3newvitaaccuracy
+auc(simdata3_test$hospital_deaths, sim3newvitapreds)
+table(sim3newvitapreds, simdata3_test$hospital_deaths)
+
+sim3boruta <- glm(data = simdata3_train, hospital_deaths ~ encounter_idnew + patient_idnew + bminew+ agenew+ apache_post_operativenew+ map_apachenew + ventilated_apachenew + d1_diasbp_noninvasive_maxnew + d1_heartrate_maxnew + d1_mbp_maxnew + d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew +  d1_sysbp_maxnew + h1_diasbp_noninvasive_maxnew + h1_heartrate_minnew + h1_sysbp_minnew + h1_resprate_minnew + d1_glucose_maxnew, family = "binomial")
+
+sim3borutapreds <- predict(sim3boruta, simdata3_test, "response")
+sim3borutapreds <- ifelse(sim3borutapreds > .5, 1, 0)
+sim3borutaaccuracy <- mean(sim3borutapreds == simdata3_test$hospital_deaths)
+sim3borutaaccuracy
+auc(simdata3_test$hospital_deaths, sim3borutapreds)
+table(sim3borutapreds, simdata3_test$hospital_deaths)
+
+sim3altmann <- glm(data = simdata3_train, hospital_deaths ~  encounter_idnew + patient_idnew + bminew+ agenew+ apache_post_operativenew+ gcs_verbal_apachenew + map_apachenew + ventilated_apachenew + d1_diasbp_noninvasive_maxnew + d1_heartrate_maxnew + d1_mbp_maxnew + d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew + d1_sysbp_maxnew + h1_diasbp_noninvasive_maxnew +  h1_heartrate_minnew + h1_resprate_minnew +  d1_glucose_maxnew + h1_sysbp_minnew, family = "binomial")
+sim3altmannpreds <- predict(sim3altmann, simdata3_test, "response")
+sim3altmannpreds <- ifelse(sim3altmannpreds > .5, 1, 0)
+sim3altmannaccuracy <- mean(sim3altmannpreds == simdata3_test$hospital_deaths)
+sim3altmannaccuracy
+auc(simdata3_test$hospital_deaths, sim3altmannpreds)
+table(sim3altmannpreds, simdata3_test$hospital_deaths)
+
+sim3VSURFinterpretation <- glm(data = simdata3_train, hospital_deaths ~ encounter_idnew + patient_idnew + agenew + bminew + apache_post_operativenew + pre_icu_los_daysnew + gcs_verbal_apachenew + map_apachenew + ventilated_apachenew + d1_diasbp_noninvasive_maxnew + d1_heartrate_maxnew + d1_mbp_maxnew +d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew + d1_sysbp_maxnew + h1_diasbp_noninvasive_maxnew + h1_heartrate_minnew + h1_resprate_minnew + h1_sysbp_minnew + d1_glucose_maxnew + d1_potassium_maxnew, family = "binomial")
+sim3VSURFinterpretationpreds <- predict(sim3VSURFinterpretation, simdata3_test, "response")
+sim3VSURFinterpretationpreds <- ifelse(sim3VSURFinterpretationpreds > .5, 1, 0)
+sim3VSURFinterpretationaccuracy <- mean(sim3VSURFinterpretationpreds == simdata3_test$hospital_deaths)
+sim3VSURFinterpretationaccuracy
+auc(simdata3_test$hospital_deaths, sim3VSURFinterpretationpreds)
+table(sim3VSURFinterpretationpreds, simdata3_test$hospital_deaths)
+
+sim3VSURFprediction <- glm(data = simdata3_train, hospital_deaths ~ agenew + bminew + apache_post_operativenew + d1_heartrate_maxnew + d1_mbp_maxnew + d1_spo2_maxnew + d1_spo2_minnew + d1_sysbp_maxnew +d1_resprate_minnew + h1_diasbp_noninvasive_maxnew+ h1_heartrate_minnew + h1_resprate_minnew + h1_sysbp_minnew + d1_glucose_maxnew, family = "binomial")
+sim3VSURFpredictionpreds <- predict(sim3VSURFprediction, simdata3_test, "response")
+sim3VSURFpredictionpreds <- ifelse(sim3VSURFpredictionpreds > .5, 1, 0)
+sim3VSURFpredictionaccuracy <- mean(sim3VSURFpredictionpreds == simdata3_test$hospital_deaths)
+sim3VSURFpredictionaccuracy
+auc(simdata3_test$hospital_deaths, sim3VSURFpredictionpreds)
+table(sim3VSURFpredictionpreds, simdata3_test$hospital_deaths)
+
+sim3VarSelRF <- glm(data = simdata3_train, hospital_deaths ~ agenew + apache_post_operativenew + bminew + d1_diasbp_noninvasive_maxnew + d1_glucose_maxnew + d1_heartrate_maxnew + d1_mbp_maxnew + d1_potassium_maxnew + d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew + d1_sysbp_maxnew + d1_sysbp_minnew + encounter_idnew + h1_diasbp_noninvasive_maxnew + h1_heartrate_minnew + h1_resprate_minnew + h1_spo2_maxnew + h1_sysbp_minnew + h1_sysbp_noninvasive_minnew + map_apachenew + patient_idnew + pre_icu_los_daysnew + ventilated_apachenew, family = "binomial")
+sim3VarSelRFpreds <- predict(sim3VarSelRF, simdata3_test, "response")
+sim3VarSelRFpreds <- ifelse(sim3VarSelRFpreds > .5, 1, 0)
+sim3VarSelRFaccuracy <- mean(sim3VarSelRFpreds == simdata3_test$hospital_deaths)
+sim3VarSelRFaccuracy
+auc(simdata3_test$hospital_deaths, sim3VarSelRFpreds)
+table(sim3VarSelRFpreds, simdata3_test$hospital_deaths)
+
+sim3permutation <- glm(data = simdata3_train, hospital_deaths ~ encounter_idnew + patient_idnew + bminew+ agenew+ apache_post_operativenew+ map_apachenew + ventilated_apachenew + d1_diasbp_noninvasive_maxnew + d1_heartrate_maxnew + d1_mbp_maxnew + d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew +  d1_sysbp_maxnew + h1_diasbp_noninvasive_maxnew + h1_heartrate_minnew + h1_sysbp_minnew + h1_resprate_minnew + d1_glucose_maxnew, family = "binomial")
+sim3permutationpreds <- predict(sim3permutation, simdata3_test, "response")
+sim3permutationpreds <- ifelse(sim3permutationpreds > .5, 1, 0)
+sim3permutationaccuracy <- mean(sim3permutationpreds == simdata3_test$hospital_deaths)
+sim3permutationaccuracy
+auc(simdata3_test$hospital_deaths, sim3permutationpreds)
+table(sim3permutationpreds, simdata3_test$hospital_deaths)
+
+sim3RFE <- glm(data = simdata3_train, hospital_deaths ~ agenew + apache_post_operativenew + bminew + d1_diasbp_noninvasive_maxnew + d1_glucose_maxnew + d1_heartrate_maxnew + d1_mbp_maxnew + d1_potassium_maxnew + d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew + d1_sysbp_maxnew + encounter_idnew + gcs_verbal_apachenew + h1_diasbp_noninvasive_maxnew + h1_heartrate_minnew + h1_mbp_noninvasive_maxnew + h1_resprate_minnew + h1_sysbp_minnew + icu_idnew + map_apachenew + patient_idnew + pre_icu_los_daysnew + ventilated_apachenew, family = "binomial")
+sim3RFEpreds <- predict(sim3RFE, simdata3_test, "response")
+sim3RFEpreds <- ifelse(sim3RFEpreds > .5, 1, 0)
+sim3RFEaccuracy <- mean(sim3RFEpreds == simdata3_test$hospital_deaths)
+sim3RFEaccuracy
+auc(simdata3_test$hospital_deaths, sim3RFEpreds)
+table(sim3RFEpreds, simdata3_test$hospital_deaths)
+
+sim3realmodel <- glm(data = simdata3_train, hospital_deaths ~ encounter_idnew + patient_idnew + bminew+ agenew+ apache_post_operativenew+ map_apachenew + ventilated_apachenew + d1_diasbp_noninvasive_maxnew + d1_heartrate_maxnew + d1_mbp_maxnew + d1_resprate_minnew + d1_spo2_maxnew + d1_spo2_minnew +  d1_sysbp_maxnew + h1_diasbp_noninvasive_maxnew + h1_heartrate_minnew + h1_sysbp_minnew + apache_2_diagnosisnew + h1_spo2_maxnew + h1_resprate_minnew + d1_glucose_maxnew + d1_potassium_maxnew +gcs_verbal_apachenew +pre_icu_los_daysnew, family = "binomial")
+sim3realmodelpreds <- predict(sim3realmodel, simdata3_test, "response")
+sim3realmodelpreds <- ifelse(sim3realmodelpreds > .5, 1, 0)
+sim3realmodelaccuracy <- mean(sim3realmodelpreds == simdata3_test$hospital_deaths)
+sim3realmodelaccuracy
+auc(simdata3_test$hospital_deaths, sim3realmodelpreds)
+table(sim3realmodelpreds, simdata3_test$hospital_deaths)
+```
+
+```{r correlationn test, eval=FALSE}
+view(round(cor(simdata2x), digits = 2 ))# rounded to 2 decimals)
+```
+
+```{r input and clean summary data, include=FALSE}
+sumdata3 <- read_csv("boxplots.csv")
+sumdata2 <- read_csv("main.csv")
+view(sumdata3)
+view(sumdata2)
+sumdata2<- sumdata2 %>% filter(Algorithm != 'VSURF prediction' & Algorithm !='VSURF interpretation')
+sumdata3<- sumdata3 %>% filter(Algorithm != 'VSURF prediction' & Algorithm !='VSURF interpretation')
+```
+
+|           VSURF was not included in the results of this report due to the algorithms long computation time. Appendix C illustrates how much longer VSURF took to perform compared to the other algorithms.
+
+### Simulation One Results
+
+#### Figure Two
+```{r sim 1 boxplots}
+sumdata3$variablenum <- as.numeric(sumdata3$variablenum)
+colnames(sumdata3)[4] = "Type"
+sumdata3$Type[sumdata3$Type=='sim2']<-'sim 2' 
+sumdata3$Type[sumdata3$Type=='sim3']<-'sim 3' 
+sumdata3$correct<- as.factor(sumdata3$correct)
+sumdata3$correct<-relevel(sumdata3$correct, "chosen incorrectly")
+sumdata31 <- sumdata3 %>% filter(Type=='sim 1')
+ggplot(sumdata31, aes(x = Algorithm, y = variablenum, fill = correct)) + 
+  geom_bar(stat = "identity") + theme(legend.position="none") + labs(x="Algorithm Type", y="Number of Variables Chosen", title="Number of Variables Chosen in Simulation 1")  +scale_fill_manual(values = c("Maroon","Orange"))
+sumdata32 <- sumdata3 %>% filter(Type=='sim 2')
+```
+
+|           Simulation one was where none of the predictors were relevant, therefore algorithms who chose the smallest amount of predictors performed the best. Figure two shows that some algorithms performed much better than others on data with no relevant predictors. RFE and VarSelRF performed the best in this simulation, with each algorithm choosing the minimum number of variables it is allowed. RFE and VarSelRF are forced to choose at least two. Altmann and permutation both choose variables incorrectly, but not nearly as many as Boruta and the two Vita Algorithms. These three algorithms appear to have a very difficult time working with data with non relevant predictors. 
+
+### Simulation Two Results
+
+#### Figure Three
+```{r sim data 2 boxplots}
+b1<-ggplot(sumdata32, aes(x = Algorithm, y = variablenum, fill = correct)) + 
+  geom_bar(stat = "identity") + theme(legend.position="none") + labs(x="Algorithm Type", y="Number of Variables Chosen", title="Number of Variables Chosen in Simulation 2")  +scale_fill_manual(values = c("Maroon","Orange"))
+b1 + geom_hline(yintercept=49)
+sumdata33 <- sumdata3 %>% filter(Type=='sim 3')
+```
+
+|           An important initial thing to notice from Figure three, is that the original Vita is not included with the rest of the algorithms. This is because, due to the correlated simulated data, when Vita calculated the initial permutation importance, none of the variables had negative or zero importance scores. This meant that Vita was unable to form a null distribution using those scores and continue the process of it's algorithm. In Figure three, the orange section of the bars represents the amount of variables that were chosen correctly, which were part of the 49 intended important variables. The maroon section of the bars represents all variables that were incorrectly chosen. The black line in the graph is at 49, to show how many variables should have been chosen for the ideal model. 
+
+|           It appears that Altmann, Vita and Boruta performed the best in choosing the most intended important variables, however all three choose a large amount of irrelevant variables, which can be damaging for interpretation. The new Vita algorithm got closest to choosing all the correct variables, however it also chose a the largest number of unimportant variables. Perm, RFE and VarSelRF all chose under 40 variables, however they performed the best at choosing the least amount of unimportant variables. A full list of variables that the algorithms chose as important for the second simulated dataset can be found in appendix B.
+
+|           Figure four below displays the classification tables for the models created by the algorithms in simulation two. Classification tables compare the predicted results from the models, with the actual results from the simulated data. These tables help display overall accuracy as well as type one and two error. Type one error would be predicting that someone died when they actually survived and type two error would be predicting that someone survived when they actually died. 
+
+#### Figure Four
+```{r sim data 2 classification tables}
+knitr::include_graphics("class1.png")
+```
+
+|           Figure four shows that the variables chosen by the new Vita for the second simulated dataset, resulted in the most accurate model. However, this is likely because Vita choose many variables and could likely be overfitting the data. Altmann and Boruta performed similarly well, with both algorithms sharing the lowest false negative missclassification rate. RFE and VarSelRf seem to have performed the worst with this simulated dataset. Type One error, Type Two error, Accuracy and AUC values will be further examined when comparing the algorithms across all simulations.
+
+### Simulation Three Results
+
+#### Figure Five
+```{r sim data 3 boxplots}
+b2<- ggplot(sumdata33, aes(x = Algorithm, y = variablenum, fill = correct)) + 
+  geom_bar(stat = "identity") + theme(legend.position="none") + labs(x="Algorithm Type", y="Number of Variables Chosen", title="Number of Variables Chosen in Simulation 3") + scale_x_discrete(guide = guide_axis(n.dodge=2)) +scale_fill_manual(values = c("Maroon","Orange"))
+b2 + geom_hline(yintercept=24)
+```
+
+|           Figure five shows the variables chosen by the algorithms using the third simulated dataset, where there is no correlation. The range for how many variables each model chose is much smaller for this simulated dataset than for simulated dataset two. Each algorithm chose between 19 and 25 variables and they chose at most two incorrect variables. Altmann, Boruta, Permutation and RFE all resulted in no variables incorrectly being chosen, however they chose less correct variables than other models. All models are performing very well on this simulated dataset without correlation, and Vita appears to be doing the best at choosing the largest amount of important variables. None of the algorithms chose all 24 important variables. When looking at which of the variables these algorithms missed, the variables that were not chosen were consistently those with the smallest designated effect sizes of 0.5 or -0.5. A full list of variables that the algorithms chose as important for the third simulated dataset can be found in appendix B.
+
+|           The classification tables in Figure Six show the the algorithms are doing similarly well on classification accuracy. It appears that Vita, Altmann and VarSelRF are performing the best, while Boruta and Permutation are performing the worst. 
+
+#### Figure Six
+```{r sim data 3 classification tables}
+knitr::include_graphics("class2.png")
+```
+
+### Results Comparing Simulation Types
+
+#### Figure Seven
+```{r AUC and accuracy dotplots, message=FALSE, warning=FALSE}
+sumdata2sims <- sumdata2 %>% filter(Algorithm != 'VSURF prediction' & Algorithm !='VSURF interpretation')
+
+colnames(sumdata2sims)[2] = "Accuracy"
+sumdata2sims$Accuracy <- as.numeric(sumdata2sims$Accuracy)
+sumdata2sims$Algorithm[sumdata2sims$Algorithm == 'New Vita'] <- 'Vita new'
+colnames(sumdata2sims)[7] = "Type"
+sumdata2sims$Type[sumdata2sims$Type=='sim2']<-'sim 2' 
+sumdata2sims$Algorithm[sumdata2sims$Algorithm=='Intended model']<-'Intended Model' 
+sumdata2sims$Type[sumdata2sims$Type=='sim3']<-'sim 3' 
+p1<-ggplot(sumdata2sims, aes(y = Accuracy, x = Algorithm, fill=Type, color=Type)) + geom_dotplot(binaxis='y', stackdir='center') + labs(x="Algorithm Type", y="Classification Accuracy", title="Algorithm Accuracy") + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+sumdata2sims$AUC <- as.numeric(sumdata2sims$AUC)
+p2<-ggplot(sumdata2sims, aes(y = AUC, x = Algorithm, fill=Type, color=Type)) + geom_dotplot(binaxis='y', stackdir='center') + labs(x="Algorithm Type", y="AUC Test Rate", title="Algorithm AUC") + scale_x_discrete(guide = guide_axis(n.dodge=2))
+grid.arrange(p1,p2, ncol=1)
+```
+
+|           From Figure seven it is clear to see that some algorithms are performing better on some datatypes than others. Some algorithms such as Boruta and Altmann are performing much better on simulation two data than simulation three, whereas models such as VarselRF and RFE have the opposite results. It appears that Altmann and the new Vita Algorithm have the highest model accuracies across all three datasets. Some algorithms selected variables are even outperforming the accuracy of the true model for simulation two, which includes all variables with non zero effect sizes and variables highly correlated with those variables. For example, for simulation two, the new Vita, which chose many more than the 49 intended important variables, has a higher accuracy than the model with only the intended variables. This was surprising and implies that some variables that have even less than a .6 correlation with the variables that have their own effect size, are providing additional information to the model and should be included if the goal is for more accurate prediction.
+
+|           When looking at the AUC results, it is clear that all algorithms are doing much better on the two simulated datasets compared to the real dataset. The reason this was not clear when showing the accuracy, is because all algorithms chose variables for a model that could correctly predict the majority of cases where patients don't die, meaning these models have a low type one error. For the real data, the cases where patients don't die happen to be an overwhelming majority of the cases (1838 people survived and 151 died). This results in a good overall accuracy, despite the fact that all models built from the algorithms have very high type two errors. The models built can predict when a patient dies less than 30% of the time. The overall accuracy appears artificially high due to this unbalanced response vector, so the type one error is balancing out the type two error, but the AUC clearly shows that the algorithms are not doing nearly as well at choosing variables which are capable of accurately predicting hospital deaths when working with the real data. VarSelRF has the highest AUC when looking at the model built using important variables found from the real data.
+
+
+#### Figure Eight
+```{r AUC dotplot without real, message=FALSE, warning=FALSE}
+sumdata2simsclose <- sumdata2sims %>% filter(Type != 'real')
+ggplot(sumdata2simsclose, aes(y = AUC, x = Algorithm, fill=Type, color=Type)) + geom_dotplot(binaxis='y', stackdir='center') + labs(x="Algorithm Type", y="AUC Test Rate", title="Algorithm AUC") + scale_x_discrete(guide = guide_axis(n.dodge=2))
+```
+
+|           For Figure eight, the real data AUC Test rates were removed, to closer examine the differences between simulation two and three. It appears that algorithms performed in a more similar manner for simulation three without correlation compared to simulation two. Vita, VarSelRF and Altmann had the highest AUC for models using the third simulated dataset. Boruta and the new Vita still had a high AUC, but comparatively did not perform as well as the other algorithms for simulation three. However, Boruta and the new Vita both performed the best using the second simulation datasets with correlation. Altmann also did very well on the second simulated dataset. It appears that overall Altmann and new Vita algorithms choose variables for models with the highest average AUC's across simulation one and two. A closer look into the type one and two errors of these models is shown below.
+
+#### Figure Nine
+```{r type one and two error dotplots, message=F, warning=F}
+colnames(sumdata2sims)[3] = "Type1"
+sumdata2sims$Type1 <- as.numeric(sumdata2sims$Type1)
+g1<-ggplot(sumdata2sims, aes(y =Type1, x = Algorithm, fill=Type, color=Type, binwidth = 0.5)) + geom_dotplot(binaxis='y', stackdir='center') + labs(x="Algorithm Type", y="Type One Error Rate", title="Algorithm Type One Error") + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+colnames(sumdata2sims)[4] = "Type2"
+sumdata2sims$Type2 <- as.numeric(sumdata2sims$Type2)
+g2<-ggplot(sumdata2sims, aes(y =Type2, x = Algorithm, fill=Type, color=Type, binwidth = 0.5)) + geom_dotplot(binaxis='y', stackdir='center') + labs(x="Algorithm Type", y="Type Two Error Rate", title="Algorithm Type Two Error") + scale_x_discrete(guide = guide_axis(n.dodge=2))
+grid.arrange(g1,g2, ncol=1)
+```
+
+|           When looking at Figure nine, you can once again clearly see that the real data is an outlier. The real data results in the lowest type one error of all the data types and the highest type two error, this is true across all algorithms. This is once again because the type one error is artificially low, due to having a very large number of patients who survive. Also as mentioned before, all algorithms are having a much harder time at choosing variables which can accurately predict death for the real data, and this is resulting in a very high type two error. Despite none of the algorithms doing very well, Altmann selected a model that has the lowest type two error and Altmann and the new Vita algorithm selected a model have the lowest type one errors, when working with the real data.
+
+#### Figure Ten
+```{r type one and two error without real, message=FALSE, warning=FALSE}
+colnames(sumdata2simsclose)[3] = "Type1"
+sumdata2simsclose$Type1 <- as.numeric(sumdata2simsclose$Type1)
+g1<-ggplot(sumdata2simsclose, aes(y =Type1, x = Algorithm, fill=Type, color=Type, binwidth = 0.5)) + geom_dotplot(binaxis='y', stackdir='center') + labs(x="Algorithm Type", y="Type One Error Rate", title="Algorithm Type One Error") + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+colnames(sumdata2simsclose)[4] = "Type2"
+sumdata2simsclose$Type2 <- as.numeric(sumdata2simsclose$Type2)
+g2<-ggplot(sumdata2simsclose, aes(y =Type2, x = Algorithm, fill=Type, color=Type, binwidth = 0.5)) + geom_dotplot(binaxis='y', stackdir='center') + labs(x="Algorithm Type", y="Type Two Error Rate", title="Algorithm Type Two Error") + scale_x_discrete(guide = guide_axis(n.dodge=2))
+grid.arrange(g1,g2, ncol=1)
+```
+
+|           Figure ten takes a closer extermination at how the algorithms performed on the simulated datasets, with type one and type two error. For type one error, where one is incorrectly predicting a patient dies, Boruta, Altmann and the new Vita performed the best for the second simulated dataset, while Vita and VarSelRF had the lowest type one error when using the third simulated dataset. The true model for simulated datastes two and three, with 24 and 49 important predictors, had a lower type one error rate than any of the other algorithms, except for Altmann, which had a lower type one error rate than the true model using the second simulated dataset. Multiple algorithms had a lower type two error than the true model for the two simulations. Boruta and the new Vita both had very low type two errors for the second simulated dataset, meaning they were very good at accurately predicting deaths that occur. VarSelRF, Altmann and Vita had the lowest type two errors for the third simulated dataset. 
+
+|           After looking at the overall accuracy and classification error rates of the algorithms in the different simulations, it is now also important to take into account computation time. When working with medical or genetic datasets, computation times for these algorithms can quickly become large. For example, the VSURF algorithm can take up to 12 hours to run with this relatively small dataset while using paramaters lower than the algorithm's default settings on a MacBook, this is once again why this algorithm was not included.  Because of the potential to have these large computation times, it is not only important to consider how well these algorithms are doing at selecting important variables, but also how long it is taking them, as some algorithms will not be as feasible for working with large amounts of data.
+
+#### Figure Eleven
+```{r computation time dotplpt, message=FALSE, warning=FALSE}
+sumdata2simsTime <- sumdata2sims %>% filter(Algorithm != 'Intended Model')
+colnames(sumdata2simsTime)[5] = "Time"
+sumdata2simsTime$Time <- as.numeric(sumdata2simsTime$Time)
+ggplot(sumdata2simsTime, aes(y = Time, x = Algorithm, fill=Type, color=Type)) + geom_dotplot(binaxis='y', stackdir='center') + labs(x="Algorithm Type", y="Run Time in Seconds", title="Algorihm Computation Time") + scale_x_discrete(guide = guide_axis(n.dodge=2))
+```
+
+|           From Figure eleven we can see that the Altmann algorithm has by far the highest computation time, of about 3,300 seconds on average, with Boruta having the second highest time of around 1,600 seconds on average. RFE has the third highest time, and it is quite a bit higher than VarSelRF. This is what we would expect, because RFE is a similar algorithm to VarSelRF, except RFE recomputes importance scores every time variables are dropped, which takes a significant amount of time. The new Vita algorithm takes about twice as long as Vita for a similar reason. The new Vita algorithm has to recompute importance scores twice, when the dataset doesn't initially produce 30 negative or zero importance scores. This process of computing importance scores takes up the majority of the time of the Vita algorithm, therefore the new Vita, which has to do this step twice, takes about double the time as Vita. 
+
+#### Figure Twelve
+```{r computation time scatterplot, warning=FALSE}
+sumdata2simscloseTime <- sumdata2simsclose %>% filter(Algorithm != 'Intended Model')
+colnames(sumdata2simscloseTime)[5] = "Time"
+sumdata2simscloseTime$Time <- as.numeric(sumdata2simscloseTime$Time)
+sumdata2simscloseTime <- sumdata2simscloseTime %>% filter(Type != 'sim 1')
+ggplot(sumdata2simscloseTime, aes(y = AUC, x = Time, color = Algorithm, shape=Type)) + geom_point() + labs(x="Algorithm Computation Time", y="AUC Test Rate", title="Algorihm AUC by Time") 
+```
+
+|           Figure twelve shows that there does appear to be a positive correlation between AUC test rate and computation time. Although the model AUC is positively correlated with algorithm computation time, it appears that Vita and the new Vita are positive outliers to this trend. Vita and the new Vita both have very high AUC's for each simulation, when taking into consideration their very low computation times. From examining these results it appears that out of the algorithms studied, Vita and the new Vita would perform the best at accurately selecting important predictors, in a short amount of time. Having a low computation time can make them very useful when working with data that has large numbers of predictors and observations, such as genetic data. However, it is also important to remember that Vita performed the worst on data without any important predictors, so if one is unsure if there are important predictors in their dataset, Vita is not the best option. Although Altmann appears to be performing very well on both simulated datasets, it's high computation time can make it difficult to use when working with large datasets. 
+
+### Observations From the Real Dataset
+
+|           Although it doesn't make sense to see how many variables the algorithms correctly chose for the real data, it is interesting to examine what variables were commonly chosen. Apache 4a hospital death prob and apache 4a icu death prob were chosen for every model. This makes sense as these two variables are predictors of death based on other variables. Therefore it is a good thing that every model acknowledged that these were good predictors of death. Other variables such as d1 sysbp min, h1 mbp min, h1 sysbp max and gcs motor apache, were chosen for a majority of the algorithms. These variables that were chosen multiple times by multiple different algorithms are important variables for predicting patient death in hospital settings. An entire list of variables that were chosen by each algorithm using the real data is listed in Appendix B. 
+
+## Discussion and Conclusion
+
+|           After examining these results it appears that Vita is performing on average the best in simulations where there are important predictors, when taking into account computation time. Altmann is actually performing the best overall across these different simulations, but it has a much higher computation time than Vita, which can be a big determent when working with large amounts of data. Despite Vita working well on situations where there are relevant predictors, especially the second and third simulated datasets, Vita is performing very badly on the simulated dataset with no relevant predictors. In this situation, Vita and the new Vita chose nearly all predictors as relevant. This is a big downside to Vita, if you're working with data and are unsure if there are any important predictors. Altmann  selected some variables as relevant for simulation one, but it was far less than Vita. Altmann also performed notably better than Vita on the real dataset, with a lower type one and two error and a higher AUC. 
+
+|           Depending on the size of the data one is working with and the computational capabilities available to them, it appears that it would be better to use Altmann if resources allow. However, when working with very large amounts of data, for things such as genetic research, Vita and the new Vita algorithm appear to perform the best in a small amount of time. Also, despite Altmann performing the best, it is important to once again note that none of these algorithms performed very well on the real data, this shows that there is still large room for improvement when developing these algorithms for selecting important variables. More research needs to be done on whether or not correlated variables should be selected and if they should, investigations need to take place to determine what types and levels of correlations these algorithms should determine as important. 
+
+|           When doing future research on which current algorithms perform best, it would be beneficial to look at a wider range of algorithms, as there has been hundreds created. It would also be beneficial to do more experiments to find the true optimal parameters for these algorithms and to see if the optimal parameters differ based on the size or the type of the data. A final area for future research would be to examine the capabilities of algorithms like VSURF, which were not able to be included in this report due to computation time. Research using a more powerful computer would be able to better examine these computationally difficult algorithms, in a similar way to what was done in this paper. 
+
+|           Continuing to compare these algorithms and understand their strengths and weaknesses in different settings, is a critical first step in improving these algorithms in the future. These algorithms have the potential to work through incredibly large amounts of data, unguided, and find patterns and important variables that we wouldn't have been able to see before. This is especially useful when working with medical or genetic data, and trying to find the cure for genetic diseases that we don't yet understand. As these algorithms improve, there is hope that they will be able to find the potential causes for these diseases, through variable selection and other machine learning techniques, leading to potential cures down the road. 
+
+\pagebreak
+
+## Appendix 
+
+### Appendix A: Full List of Real Dataset Variables & Descriptions
+
+encounter id-	Unique identifier associated with a patient unit stay
+
+patient id-	Unique identifier associated with a patient
+
+hospital id-	Unique identifier associated with a hospital
+
+age-	The age of the patient on unit admission
+
+bmi-	The body mass index of the person on unit admission
+
+elective surgery-	Whether the patient was admitted to the hospital for an elective surgical operation
+
+ethnicity-	The common national or cultural tradition which the person belongs to
+
+gender-	Sex of the patient
+
+height-	The height of the person on unit admission
+
+icu admit source-	The location of the patient prior to being admitted to the unit
+
+icu id-	A unique identifier for the unit to which the patient was admitted
+
+icu type-	A classification which indicates the type of care the unit is capable of providing
+
+pre icu los days-	The length of stay of the patient between hospital admission and unit admission
+
+weight-	The weight (body mass) of the person on unit admission
+
+apache 2 dignosis-	The APACHE II diagnosis for the ICU admission
+
+apache 3j diagnosis-	The APACHE III-J sub-diagnosis code which best describes the reason for the ICU admission
+
+apache post operative-	The APACHE operative status (post-operative or non-operative)
+
+gcs eyes-	The eye opening component of the Glasgow Coma Scale measured during the first 24 hours which results in the highest APACHE III score
+
+gcs motor-	The motor opening component of the Glasgow Coma Scale measured during the first 24 hours which results in the highest APACHE III score
+
+gcs verbal-	The verbal component of the Glasgow Coma Scale measured during the first 24 hours which results in the highest APACHE III 
+
+heart rate apache-	The heart rate measured during the first 24 hours which results in the highest APACHE III score
+
+intubated apache-	Whether the patient was intubated at the time of the highest scoring arterial blood gas used in the oxygenation score
+
+map apache-	The mean arterial pressure measured during the first 24 hours which results in the highest APACHE III score
+
+resprate apache-	The respiratory rate measured during the first 24 hours which results in the highest APACHE III score
+
+temp apache-	The temperature measured during the first 24 hours which results in the highest APACHE III score
+
+ventilated apache-	Whether the patient was invasively ventilated at the time of the highest scoring arterial blood gas using the oxygenation 
+
+d1 diasbp max-	The patient's highest diastolic blood pressure during the first 24 hours of their unit stay
+
+d1 diasbp min-	The patient's lowest diastolic blood pressure during the first 24 hours of their unit stay
+
+d1 diasbp noninvasive max-	The patient's highest diastolic blood pressure during the first 24 hours of their unit stay, non-invasively measured
+
+d1 diasbp noninvasive min-	The patient's lowest diastolic blood pressure during the first 24 hours of their unit stay, non-invasively measured
+
+d1 heartrate max-	The patient's highest heart rate during the first 24 hours of their unit stay
+
+d1 heartrate min-	The patient's lowest heart rate during the first 24 hours of their unit stay
+
+d1 mbp max-	The patient's highest mean blood pressure during the first 24 hours of their unit stay
+
+d1 mbp min-	The patient's lowest mean blood pressure during the first 24 hours of their unit stay
+
+d1 mbp noninvasive max-	The patient's highest mean blood pressure during the first 24 hours of their unit stay, non-invasively measured
+
+d1 mbp noninvasive min-	The patient's lowest mean blood pressure during the first 24 hours of their unit stay, non-invasively measured
+
+d1 resprate max-	The patient's highest respiratory rate during the first 24 hours of their unit stay
+
+d1 resprate min-	The patient's lowest respiratory rate during the first 24 hours of their unit stay
+
+d1 spo2 max-	The patient's highest peripheral oxygen saturation during the first 24 hours of their unit stay
+
+d1 spo2 min-	The patient's lowest peripheral oxygen saturation during the first 24 hours of their unit stay
+
+d1 sysbp max-	The patient's highest systolic blood pressure during the first 24 hours of their unit stay
+
+d1 sysbp min-	The patient's lowest systolic blood pressure during the first 24 hours of their unit stay
+
+d1 sysbp noninvasive max-	The patient's highest systolic blood pressure during the first 24 hours of their unit stay, non-invasively measured
+
+d1 sysbp noninvasive min-	The patient's lowest systolic blood pressure during the first 24 hours of their unit stay, non-invasively measured
+
+d1 temp max-	The patient's highest core temperature during the first 24 hours of their unit stay
+
+d1 temp min-	The patient's lowest core temperature during the first 24 hours of their unit stay
+
+h1 diasbp max-	The patient's highest diastolic blood pressure during the first hour of their unit stay
+
+h1 diasbp min-	The patient's lowest diastolic blood pressure during the first hour of their unit stay
+
+h1 diasbp noninvasive max-	The patient's highest diastolic blood pressure during the first hour of their unit stay, non-invasively measured
+
+h1 diasbp noninvasive min-	The patient's lowest diastolic blood pressure during the first  hour of their unit stay, non-invasively measured
+
+h1 heartrate max-	The patient's highest heart rate during the first hour of their unit stay
+
+h1 heartrate min-	The patient's lowest heart rate during the first hour of their unit stay
+
+h1 mbp max-	The patient's highest mean blood pressure during the first hour of their unit stay
+
+h1 mbp min-	The patient's lowest mean blood pressure during the first hour of their unit stay
+
+h1 mbp noninvasive max-	The patient's highest mean blood pressure during the first hour of their unit stay, non-invasively measured
+
+h1 mbp noninvasive min-	The patient's lowest mean blood pressure during the first hour of their unit stay, non-invasively measured
+
+h1 resprate max-	The patient's highest respiratory rate during the first hour of their unit stay
+
+h1 resprate min-	The patient's lowest respiratory rate during the first hour of their unit stay
+
+h1 spo2 max-	The patient's highest peripheral oxygen saturation during the first hour of their unit stay
+
+h1 spo2 min-	The patient's lowest peripheral oxygen saturation during the first hour of their unit stay
+
+h1 sysbp max-	The patient's highest systolic blood pressure during the first hour of their unit stay
+
+h1 sysbp min-	The patient's lowest systolic blood pressure during the first hour of their unit stay
+
+h1 sysbp noninvasive max-	The patient's highest systolic blood pressure during the first hour of their unit stay, non-invasively measured
+
+h1 sysbp noninvasive min-	The patient's lowest systolic blood pressure during the first hour of their unit stay, non-invasively measured
+
+d1 glucose max-	The highest glucose concentration of the patient in their serum or plasma during the first 24 hours of their unit stay
+
+d1 glucose min-	The lowest glucose concentration of the patient in their serum or plasma during the first 24 hours of their unit stay
+
+d1 potassium max-	The highest potassium concentration for the patient in their serum or plasma during the first 24 hours of their unit stay
+
+d1 potassium min-	The lowest potassium concentration for the patient in their serum or plasma during the first 24 hours of their unit stay
+
+apache hospital death prob-	The APACHE IVa probabilistic prediction of in hospital mortality for the patient which utilizes the APACHE III score
+
+apache icu death prob-	The APACHE IVa probabilistic prediction of in ICU mortality for the patient which utilizes the APACHE III score
+
+diabetes mellitus-	Whether the patient has been diagnosed with diabetes, either juvenile or adult onset, which requires medication.
+
+apache 3j bodysystem-	Admission diagnosis group for APACHE III
+
+apache 2 bodysystem-	Admission diagnosis group for APACHE II
+
+hosptial death-	If the patient died in the hospital
+
+### Appendix B: Variables Chosen as Important by Algorithms Using Simulations Two and Three and the Real Data
+
+#### Variables Chosen as Important by Algorithms Using the Real Data
+
+```{r real variables chosen}
+knitr::include_graphics("realvarlist1.png")
+```
+
+```{r real variables chosen2}
+knitr::include_graphics("realvarlist2.png")
+```
+
+#### Variables Chosen as Important by Algorithms Using the Second Simulated Dataset
+
+```{r sim2 variables chosen}
+knitr::include_graphics("sim2varlist1.png")
+```
+
+```{r sim2 variables chosen 2}
+knitr::include_graphics("sim2varlist2.png")
+```
+
+#### Variables Chosen as Important by Algorithms Using the Third Simulated Dataset
+
+```{r sim3 variables chosen}
+knitr::include_graphics("sim3varlist1.png")
+```
+
+```{r sim3 variables chosen 2}
+knitr::include_graphics("sim3varlist2.png")
+```
+
+### Appendix C: Algorithm AUC by Time with VSURF included
+
+```{r VSURF}
+knitr::include_graphics("VSURF.png")
+```
+
+|           It is important to note here that this graphic is meant to illustrate VSURF's bad computation time, it is not intended to illustrate how VSURF is performing. Due to computation time, suboptimal parameters were chosen when running VSURF's algorithm. It is expected when using the optimal parameters, that VSURF would have performed better with this data, however it would also further increase VSURFS computation time. 
+
+
+
+## Sources
+
+Agarwal, Mitisha. “Patient Survival Prediction.” Kaggle, 26 Dec. 2021, https://www.kaggle.com/datasets/mitishaagarwal/patient. 
+
+Janitza, Silke, Ender Celik and Anne-Laure Boulesteix. “A Computationally Fast Variable Importance Test for Random Forests for High-Dimensional Data.” Advances in Data Analysis and Classification, vol. 12, no. 4, 2016, pp. 885–915.  
+
+Degenhardt, Frauke, Stephan Seifert and Silke Szymczak. “Evaluation of Variable Selection Methods for Random Forests and OMICS Data Sets.” Briefings in Bioinformatics, vol. 20, no. 2, 2017, pp. 492–503.  
+
+Kursa, Miron B., and Witold R. Rudnicki. “Feature Selection with the Boruta Package.” Journal of Statistical Software, vol. 36, no. 11, 2010, pp. 1-13.  
+
+Genuer, Robin, Jean-Michel Poggi, Christine Tuleau-Malot. "VSURF: An R Package for Variable Selection Using Random Forests." The R Journal, R Foundation for Statistical Computing, vol. 7 no. 2, 2015, pp.19-33. 
+
+Genuer, Robin, Jean-Michel Poggi, Christine Tuleau-Malot. “Variable Selection Using Random Forests.” Pattern Recognition Letters, vol. 31, no. 14, 2010, pp. 2225–2236.
+
+Speiser, Jaime Lynn, Michael E. Miller, Janet Tooze and Edward Ip. “A Comparison of Random Forest Variable Selection Methods for Classification Prediction Modeling.” Expert Systems with Applications, vol. 134, 2019, pp. 93–101.
+
+Díaz-Uriarte, Ramón, and Sara Alvarez de Andrés. “Gene Selection and Classification of Microarray Data Using Random Forest.” BMC Bioinformatics, vol. 7, no. 1, 2006.
+
+Darst, Burcu F., Kristen C. Malecki and Corinne D. Engelman. “Using Recursive Feature Elimination in Random Forest to Account for Correlated Variables in High Dimensional Data.” BMC Genetics, vol. 19, no. S1, 2018. 
+
+Gregorutti, Baptiste, Bertrand Michel and Philippe Saint-Pierre. “Correlation and Variable Importance in Random Forests.” Statistics and Computing, vol. 27, no. 3, 2016, pp. 659–678. 
+
+Bag, Souvik, Kapil Gupta and Soudeep Deb. "A review and recommendations on variable selection methods in regression models for binary data." Indian Institute of Management Bangalore, 2022.
+
+Chen, Xi, and Hemant Ishwaran. “Random Forests for Genomic Data Analysis.” Genomics, vol. 99, no. 6, 2012, pp. 323–329.
+
+Breiman, Leo. "Random Forests." Machine Learning, vol.45, 2001, pp. 5-32.
+
+Altmann, André, et al. “Permutation Importance: A Corrected Feature Importance Measure.” Bioinformatics, vol. 26, no. 10, 2010, pp. 1340–1347.
+
+Schonlau, Matthias, and Rosie Yuyan Zou. “The Random Forest Algorithm for Statistical Learning.” The Stata Journal: Promoting Communications on Statistics and Stata, vol. 20, no. 1, 2020, pp. 3–29.
